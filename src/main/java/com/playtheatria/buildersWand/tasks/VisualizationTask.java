@@ -3,8 +3,8 @@ package com.playtheatria.buildersWand.tasks;
 import com.google.common.collect.Lists;
 import com.playtheatria.buildersWand.utils.Err;
 import com.playtheatria.buildersWand.utils.Ok;
-import com.playtheatria.buildersWand.wand.WandData;
 import com.playtheatria.buildersWand.wand.Wand;
+import com.playtheatria.buildersWand.wand.WandData;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -15,8 +15,6 @@ import org.bukkit.scheduler.BukkitRunnable;
 import java.util.List;
 
 public class VisualizationTask {
-
-
 
     static List<Material> ignoredMaterials = List.of(
             Material.AIR,
@@ -42,24 +40,26 @@ public class VisualizationTask {
                         case Ok<WandData, Exception> ok -> {
                             Block block = player.getTargetBlock(null, 16);
                             if (ignoredMaterials.contains(block.getType())) continue;
-                            playVisualEffect(block.getLocation(), ok.value());
+                            playVisualEffect(block, ok.value());
                         }
                         case Err<WandData, Exception> err -> {}
                     }
                 }
             }
         };
-        return bukkitRunnable.runTaskTimer(plugin, 20, 20).getTaskId();
+        return bukkitRunnable.runTaskTimer(plugin, 20, 30).getTaskId();
     }
 
-    public static void playVisualEffect(Location location, WandData wandData) {
-        for (Location locationIterate : getCubeParticleLocations(location, wandData,0.2)) {
-            location.getWorld().spawnParticle(Particle.DUST, locationIterate, 1, 0.0,0.0,0.0, new Particle.DustOptions(Color.LIME, 1));
+    public static void playVisualEffect(Block block, WandData wandData) {
+        Location location = block.getLocation();
+        for (Location locationIterate : VisualizationTask.getCubeParticleLocations(block, wandData, 0.5)) {
+            location.getWorld().spawnParticle(Particle.DUST, locationIterate, 1, 0.0,0.0,0.0, new Particle.DustOptions(Color.LIME, 0.5f));
         }
     }
 
-    public static List<Location> getCubeParticleLocations(Location loc, WandData wandData, double particleDistance) {
+    public static List<Location> getCubeParticleLocations(Block block, WandData wandData, double particleDistance) {
         List<Location> particleLocations = Lists.newArrayList();
+        Location loc = block.getLocation();
         World world = loc.getWorld();
 
         double minX = Math.ceil(loc.getBlockX() - ((double) wandData.dimensions().x) / 2);
@@ -83,11 +83,17 @@ public class VisualizationTask {
                 }
             }
         }
+        Bukkit.getOnlinePlayers().forEach(player -> {
+            player.sendMessage("Particle locations size: " + particleLocations.size());
+        });
         return particleLocations;
     }
 
-    public static List<Location> getCubeBlockLocations(Location loc, WandData wandData) {
+    // something screwy with the even vs odd dimensions
+
+    public static List<Location> getCubeBlockLocations(Block block, WandData wandData) {
         List<Location> blockLocations = Lists.newArrayList();
+        Location loc = block.getLocation();
         World world = loc.getWorld();
 
         double minX = Math.ceil(loc.getBlockX() - ((double) wandData.dimensions().x) / 2);
@@ -95,8 +101,16 @@ public class VisualizationTask {
         double minZ = Math.ceil(loc.getBlockZ() - ((double) wandData.dimensions().z) / 2);
 
         double maxX = Math.floor(loc.getBlockX() + ((double) wandData.dimensions().x) / 2);
-        double maxY = loc.getBlockY() + wandData.dimensions().y + 1;
+        double maxY = loc.getBlockY() + wandData.dimensions().y;
         double maxZ = Math.floor(loc.getBlockZ() + ((double) wandData.dimensions().z) / 2);
+
+        if (wandData.dimensions().x % 2 == 0) {
+            maxX -= 1;
+        }
+
+        if (wandData.dimensions().z % 2 == 0) {
+            maxZ -= 1;
+        }
 
         for (double x = minX; x <= maxX; x++) {
             for (double y = minY; y <= maxY; y++) {

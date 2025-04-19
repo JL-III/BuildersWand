@@ -1,6 +1,7 @@
 package com.playtheatria.buildersWand.listeners;
 
 import com.playtheatria.buildersWand.tasks.VisualizationTask;
+import com.playtheatria.buildersWand.utils.Cube;
 import com.playtheatria.buildersWand.utils.Err;
 import com.playtheatria.buildersWand.utils.Ok;
 import com.playtheatria.buildersWand.utils.Result;
@@ -11,11 +12,10 @@ import org.bukkit.Material;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
-import org.bukkit.event.player.PlayerInteractEvent;
 
-public class Player implements Listener {
+public class PlayerInteractEvent implements Listener {
     @EventHandler
-    public void onPlayerClick(PlayerInteractEvent event) {
+    public void onPlayerClick(org.bukkit.event.player.PlayerInteractEvent event) {
         // check if player is holding wand in left hand
         // check if player has correct amount of blocks in right hand
         if (event.getAction().equals(Action.RIGHT_CLICK_AIR)) {
@@ -23,7 +23,7 @@ public class Player implements Listener {
             Result<WandData, Exception> wandDataResult = Wand.getWandData(event.getPlayer().getInventory().getItemInMainHand());
             switch (wandDataResult) {
                 case Ok<WandData, Exception> wandData -> {
-                    for (Location location : VisualizationTask.getCubeBlockLocations(event.getPlayer().getTargetBlock(null, 16).getLocation(), wandData.value())) {
+                    for (Location location : VisualizationTask.getCubeBlockLocations(event.getPlayer().getTargetBlock(null, 16), wandData.value())) {
                         location.getBlock().setType(Material.STONE);
                     }
                 }

@@ -1,7 +1,7 @@
 package com.playtheatria.buildersWand;
 
 import com.playtheatria.buildersWand.commands.WandGive;
-import com.playtheatria.buildersWand.listeners.Player;
+import com.playtheatria.buildersWand.listeners.PlayerInteractEvent;
 import com.playtheatria.buildersWand.tasks.VisualizationTask;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -15,7 +15,7 @@ public final class BuildersWand extends JavaPlugin {
     @Override
     public void onEnable() {
         // Plugin startup logic
-        Bukkit.getServer().getPluginManager().registerEvents(new Player(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new PlayerInteractEvent(), this);
         Objects.requireNonNull(getCommand("wand")).setExecutor(new WandGive());
         taskId = VisualizationTask.run(this);
     }
