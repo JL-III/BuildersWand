@@ -1,6 +1,5 @@
 package com.playtheatria.buildersWand.tasks;
 
-import com.destroystokyo.paper.ParticleBuilder;
 import com.google.common.collect.Lists;
 import com.playtheatria.buildersWand.utils.Err;
 import com.playtheatria.buildersWand.utils.Ok;
@@ -16,6 +15,8 @@ import org.bukkit.scheduler.BukkitRunnable;
 import java.util.List;
 
 public class VisualizationTask {
+
+
 
     static List<Material> ignoredMaterials = List.of(
             Material.AIR,
@@ -39,7 +40,7 @@ public class VisualizationTask {
 
                     switch (Wand.getWandData(player.getInventory().getItemInMainHand())) {
                         case Ok<WandData, Exception> ok -> {
-                            Block block = player.getTargetBlock(null, 15);
+                            Block block = player.getTargetBlock(null, 16);
                             if (ignoredMaterials.contains(block.getType())) continue;
                             playVisualEffect(block.getLocation(), ok.value());
                         }
@@ -52,13 +53,13 @@ public class VisualizationTask {
     }
 
     public static void playVisualEffect(Location location, WandData wandData) {
-        for (Location locationIterate : getHollowCube(location, wandData,0.2)) {
+        for (Location locationIterate : getCubeParticleLocations(location, wandData,0.2)) {
             location.getWorld().spawnParticle(Particle.DUST, locationIterate, 1, 0.0,0.0,0.0, new Particle.DustOptions(Color.LIME, 1));
         }
     }
 
-    public static List<Location> getHollowCube(Location loc, WandData wandData, double particleDistance) {
-        List<Location> result = Lists.newArrayList();
+    public static List<Location> getCubeParticleLocations(Location loc, WandData wandData, double particleDistance) {
+        List<Location> particleLocations = Lists.newArrayList();
         World world = loc.getWorld();
 
         double minX = Math.ceil(loc.getBlockX() - ((double) wandData.dimensions().x) / 2);
@@ -77,11 +78,35 @@ public class VisualizationTask {
                     if (y == minY || y == maxY) components++;
                     if (z == minZ || z == maxZ) components++;
                     if (components >= 2) {
-                        result.add(new Location(world, x, y, z));
+                        particleLocations.add(new Location(world, x, y, z));
                     }
                 }
             }
         }
-        return result;
+        return particleLocations;
+    }
+
+    // Particles appear to be 1 block x and 1 block z short compared to what is placed by the block calculation
+
+    public static List<Location> getCubeBlockLocations(Location loc, WandData wandData) {
+        List<Location> blockLocations = Lists.newArrayList();
+        World world = loc.getWorld();
+
+        double minX = Math.ceil(loc.getBlockX() - ((double) wandData.dimensions().x) / 2);
+        double minY = loc.getBlockY() + 1;
+        double minZ = Math.ceil(loc.getBlockZ() - ((double) wandData.dimensions().z) / 2);
+
+        double maxX = Math.floor(loc.getBlockX() + ((double) wandData.dimensions().x) / 2);
+        double maxY = loc.getBlockY() + wandData.dimensions().y + 1;
+        double maxZ = Math.floor(loc.getBlockZ() + ((double) wandData.dimensions().z) / 2);
+
+        for (double x = minX; x <= maxX; x++) {
+            for (double y = minY; y <= maxY; y++) {
+                for (double z = minZ; z <= maxZ; z++) {
+                    blockLocations.add(new Location(world, x, y, z));
+                }
+            }
+        }
+        return blockLocations;
     }
 }
