@@ -86,8 +86,6 @@ public class VisualizationTask {
         return particleLocations;
     }
 
-    // Particles appear to be 1 block x and 1 block z short compared to what is placed by the block calculation
-
     public static List<Location> getCubeBlockLocations(Location loc, WandData wandData) {
         List<Location> blockLocations = Lists.newArrayList();
         World world = loc.getWorld();
