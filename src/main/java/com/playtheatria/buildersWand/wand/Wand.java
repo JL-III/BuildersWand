@@ -16,7 +16,11 @@ import java.util.regex.Pattern;
 
 public class Wand {
 
-    public static Result<ParsedWandData, Exception> getWandData(ItemStack itemStack) {
+    private static final Pattern MODE_PATTERN = Pattern.compile("Mode:\\s*(\\w+)");
+    private static final Pattern DIMENSIONS_PATTERN = Pattern.compile("^(-?\\d+)x(-?\\d+)x(-?\\d+)$");
+
+
+    public static Result<WandData, Exception> getWandData(ItemStack itemStack) {
         Result<WandMode, Exception> modeResult = parseWandMode(itemStack);
         Result<WandDimensions, Exception> dimensionsResult = parseWandDimensions(itemStack);
 
@@ -31,7 +35,7 @@ public class Wand {
         WandMode mode = ((Ok<WandMode, Exception>) modeResult).value();
         WandDimensions dimensions = ((Ok<WandDimensions, Exception>) dimensionsResult).value();
 
-        return new Ok<>(new ParsedWandData(itemStack, mode, dimensions));
+        return new Ok<>(new WandData(itemStack, mode, dimensions));
     }
 
     public static ItemStack getWand(WandMode wandMode, WandDimensions wandDimensions) {
@@ -41,7 +45,7 @@ public class Wand {
         itemMeta.lore(List.of(
                 Component.text("A mystical wand!"),
                 Component.text(String.format("Mode: %s", wandMode.name())),
-                Component.text(String.format("%sx%s", wandDimensions.x, wandDimensions.y))
+                Component.text(String.format("%sx%sx%s", wandDimensions.x, wandDimensions.y, wandDimensions.z))
         ));
         itemStack.setItemMeta(itemMeta);
         return itemStack;
@@ -52,8 +56,7 @@ public class Wand {
         switch (parseStringFromWandLore) {
             case Ok<String, Exception> ok -> {
                 String lore = ok.value();
-                Pattern pattern = Pattern.compile("Mode:\\s*(\\w+)");
-                Matcher matcher = pattern.matcher(lore);
+                Matcher matcher = MODE_PATTERN.matcher(lore);
                 if (matcher.find()) {
                     String modeText = matcher.group(1);
                     try {
@@ -77,10 +80,14 @@ public class Wand {
         switch (parseStringFromWandLore) {
             case Ok<String, Exception> ok -> {
                 String lore = ok.value();
-                Pattern pattern = Pattern.compile("^(-?\\d+)x(-?\\d+)$");
-                Matcher matcher = pattern.matcher(lore);
+                Matcher matcher = DIMENSIONS_PATTERN.matcher(lore);
                 if (matcher.matches()) {
-                    return new Ok<>(new WandDimensions(Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2))));
+                    return new Ok<>(new WandDimensions(
+                            Integer.parseInt(matcher.group(1)),
+                            Integer.parseInt(matcher.group(2)),
+                            Integer.parseInt(matcher.group(3))
+                    )
+                    );
                 } else {
                     return new Err<>(new Exception("Could not parse wand dimensions"));
                 }

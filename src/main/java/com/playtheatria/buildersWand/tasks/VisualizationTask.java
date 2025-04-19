@@ -1,13 +1,15 @@
 package com.playtheatria.buildersWand.tasks;
 
+import com.destroystokyo.paper.ParticleBuilder;
 import com.google.common.collect.Lists;
 import com.playtheatria.buildersWand.utils.Err;
 import com.playtheatria.buildersWand.utils.Ok;
-import com.playtheatria.buildersWand.wand.ParsedWandData;
+import com.playtheatria.buildersWand.wand.WandData;
 import com.playtheatria.buildersWand.wand.Wand;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.scheduler.BukkitRunnable;
 
@@ -19,7 +21,6 @@ public class VisualizationTask {
             Material.AIR,
             Material.CAVE_AIR,
             Material.VOID_AIR,
-            Material.WATER,
             Material.LAVA,
             Material.BUBBLE_COLUMN,
             Material.FIRE,
@@ -32,14 +33,17 @@ public class VisualizationTask {
             @Override
             public void run() {
                 for (Player player : Bukkit.getOnlinePlayers()) {
+
+                    ItemStack item = player.getInventory().getItemInMainHand();
+                    if (!item.hasItemMeta() || !item.getItemMeta().hasLore()) continue;
+
                     switch (Wand.getWandData(player.getInventory().getItemInMainHand())) {
-                        case Ok<ParsedWandData, Exception> ok -> {
-                            Block block = player.getTargetBlock(null, 10);
+                        case Ok<WandData, Exception> ok -> {
+                            Block block = player.getTargetBlock(null, 15);
                             if (ignoredMaterials.contains(block.getType())) continue;
-                            playVisualEffect(block.getLocation());
-                            player.sendMessage("Result: " + ok.value().mode() + " " + ok.value().dimensions().x + "x" + ok.value().dimensions().y);
+                            playVisualEffect(block.getLocation(), ok.value());
                         }
-                        case Err<ParsedWandData, Exception> err -> {}
+                        case Err<WandData, Exception> err -> {}
                     }
                 }
             }
@@ -47,22 +51,23 @@ public class VisualizationTask {
         return bukkitRunnable.runTaskTimer(plugin, 20, 20).getTaskId();
     }
 
-    public static void playVisualEffect(Location location) {
-        for (Location locationIterate : getHollowCube(location, 0.2)) {
-            location.getWorld().spawnParticle(Particle.ENCHANT, locationIterate, 1, 0.0,0.0,0.0, 0.01);
-            location.getWorld().spawnParticle(Particle.TOTEM_OF_UNDYING, locationIterate, 1, 0.0,0.0,0.0, 0.01);
+    public static void playVisualEffect(Location location, WandData wandData) {
+        for (Location locationIterate : getHollowCube(location, wandData,0.2)) {
+            location.getWorld().spawnParticle(Particle.DUST, locationIterate, 1, 0.0,0.0,0.0, new Particle.DustOptions(Color.LIME, 1));
         }
     }
 
-    public static List<Location> getHollowCube(Location loc, double particleDistance) {
+    public static List<Location> getHollowCube(Location loc, WandData wandData, double particleDistance) {
         List<Location> result = Lists.newArrayList();
         World world = loc.getWorld();
-        double minX = loc.getBlockX();
-        double minY = loc.getBlockY();
-        double minZ = loc.getBlockZ();
-        double maxX = loc.getBlockX()+1;
-        double maxY = loc.getBlockY()+1;
-        double maxZ = loc.getBlockZ()+1;
+
+        double minX = Math.ceil(loc.getBlockX() - ((double) wandData.dimensions().x) / 2);
+        double minY = loc.getBlockY() + 1;
+        double minZ = Math.ceil(loc.getBlockZ() - ((double) wandData.dimensions().z) / 2);
+
+        double maxX = Math.ceil(loc.getBlockX() + ((double) wandData.dimensions().x) / 2);
+        double maxY = loc.getBlockY() + wandData.dimensions().y + 1;
+        double maxZ = Math.ceil(loc.getBlockZ() + ((double) wandData.dimensions().z) / 2);
 
         for (double x = minX; x <= maxX; x = Math.round((x + particleDistance) * 1e2) / 1e2) {
             for (double y = minY; y <= maxY; y = Math.round((y + particleDistance) * 1e2) / 1e2) {
