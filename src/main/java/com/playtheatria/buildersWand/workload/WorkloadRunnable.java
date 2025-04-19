@@ -1,12 +1,17 @@
 package com.playtheatria.buildersWand.workload;
 
+import com.playtheatria.buildersWand.utils.ConfigManager;
+import org.bukkit.Bukkit;
+
 import java.util.ArrayDeque;
 import java.util.Deque;
 
 public class WorkloadRunnable implements Runnable {
+    private final ConfigManager configManager;
 
-    private static final double MAX_MILLIS_PER_TICK = 1;
-    private static final int MAX_NANOS_PER_TICK = (int) (MAX_MILLIS_PER_TICK * 1E6);
+    public WorkloadRunnable(ConfigManager configManager) {
+        this.configManager = configManager;
+    }
 
     private final Deque<Workload> workloadDeque = new ArrayDeque<>();
 
@@ -16,11 +21,14 @@ public class WorkloadRunnable implements Runnable {
 
     @Override
     public void run() {
-        long stopTime = System.nanoTime() + MAX_NANOS_PER_TICK;
+        long stopTime = System.nanoTime() + (int) (configManager.maxMillisecondsPerTick * 1E6);
         Workload nextLoad;
 
         while (System.nanoTime() <= stopTime && (nextLoad = this.workloadDeque.poll()) != null) {
             nextLoad.compute();
+            Bukkit.getOnlinePlayers().forEach(player -> {
+                player.sendMessage("WorkloadRunnable running - maxmillispertick: " + configManager.maxMillisecondsPerTick);
+            });
         }
     }
 }

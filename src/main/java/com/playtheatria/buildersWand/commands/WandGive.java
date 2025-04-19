@@ -1,5 +1,6 @@
 package com.playtheatria.buildersWand.commands;
 
+import com.playtheatria.buildersWand.utils.ConfigManager;
 import com.playtheatria.buildersWand.utils.Err;
 import com.playtheatria.buildersWand.utils.Ok;
 import com.playtheatria.buildersWand.utils.Result;
@@ -19,8 +20,13 @@ import java.util.Arrays;
 import java.util.List;
 
 public class WandGive implements CommandExecutor, TabCompleter {
+    private final ConfigManager configManager;
 
-    List<String> commandArgs = List.of("give", "debug", "set");
+    public WandGive(ConfigManager configManager) {
+        this.configManager = configManager;
+    }
+
+    List<String> commandArgs = List.of("give", "debug", "set", "speed");
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String @NotNull [] args) {
@@ -39,6 +45,22 @@ public class WandGive implements CommandExecutor, TabCompleter {
                             player.sendMessage("Invalid argument. Usage: /wand " + commandArgs.stream());
                         }
                     }
+                }
+                case 2 -> {
+                    switch (args[0]) {
+                        case "speed" -> {
+                            try {
+                                configManager.maxMillisecondsPerTick = Double.parseDouble(args[1]);
+                            } catch (NumberFormatException ex) {
+                                player.sendMessage("Invalid number format. Speed must be a double.");
+                                return true;
+                            }
+                        }
+                        default -> {
+                            player.sendMessage("Invalid argument. Usage: /wand " + commandArgs.stream());
+                        }
+                    }
+
                 }
                 case 5 -> {
                     if (args[0].equals("set")) {
@@ -109,6 +131,9 @@ public class WandGive implements CommandExecutor, TabCompleter {
                             .map(WandMode::name)
                             .filter(arg -> arg.startsWith(args[1]))
                             .toList();
+                }
+                if (args[0].equals("speed")) {
+                    return List.of("<double>");
                 }
             }
             case 3,4 -> {

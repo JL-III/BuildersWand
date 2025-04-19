@@ -52,8 +52,8 @@ public class VisualizationTask {
 
     public static void playVisualEffect(Block block, WandData wandData) {
         Location location = block.getLocation();
-        for (Location locationIterate : VisualizationTask.getCubeParticleLocations(block, wandData, 0.5)) {
-            location.getWorld().spawnParticle(Particle.DUST, locationIterate, 1, 0.0,0.0,0.0, new Particle.DustOptions(Color.LIME, 0.5f));
+        for (Location locationIterate : VisualizationTask.getCubeParticleLocations(block, wandData, 0.67)) {
+            location.getWorld().spawnParticle(Particle.DUST, locationIterate, 1, 0.0,0.0,0.0, new Particle.DustOptions(Color.LIME, 1f));
         }
     }
 
@@ -87,38 +87,5 @@ public class VisualizationTask {
             player.sendMessage("Particle locations size: " + particleLocations.size());
         });
         return particleLocations;
-    }
-
-    // something screwy with the even vs odd dimensions
-
-    public static List<Location> getCubeBlockLocations(Block block, WandData wandData) {
-        List<Location> blockLocations = Lists.newArrayList();
-        Location loc = block.getLocation();
-        World world = loc.getWorld();
-
-        double minX = Math.ceil(loc.getBlockX() - ((double) wandData.dimensions().x) / 2);
-        double minY = loc.getBlockY() + 1;
-        double minZ = Math.ceil(loc.getBlockZ() - ((double) wandData.dimensions().z) / 2);
-
-        double maxX = Math.floor(loc.getBlockX() + ((double) wandData.dimensions().x) / 2);
-        double maxY = loc.getBlockY() + wandData.dimensions().y;
-        double maxZ = Math.floor(loc.getBlockZ() + ((double) wandData.dimensions().z) / 2);
-
-        if (wandData.dimensions().x % 2 == 0) {
-            maxX -= 1;
-        }
-
-        if (wandData.dimensions().z % 2 == 0) {
-            maxZ -= 1;
-        }
-
-        for (double x = minX; x <= maxX; x++) {
-            for (double y = minY; y <= maxY; y++) {
-                for (double z = minZ; z <= maxZ; z++) {
-                    blockLocations.add(new Location(world, x, y, z));
-                }
-            }
-        }
-        return blockLocations;
     }
 }
