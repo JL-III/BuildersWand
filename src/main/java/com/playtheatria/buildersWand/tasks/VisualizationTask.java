@@ -1,6 +1,9 @@
 package com.playtheatria.buildersWand.tasks;
 
 import com.google.common.collect.Lists;
+import com.playtheatria.buildersWand.utils.Err;
+import com.playtheatria.buildersWand.utils.Ok;
+import com.playtheatria.buildersWand.wand.ParsedWandData;
 import com.playtheatria.buildersWand.wand.Wand;
 import org.bukkit.*;
 import org.bukkit.block.Block;
@@ -29,10 +32,15 @@ public class VisualizationTask {
             @Override
             public void run() {
                 for (Player player : Bukkit.getOnlinePlayers()) {
-                    if (!Wand.isWand(player.getInventory().getItemInMainHand())) continue;
-                    Block block = player.getTargetBlock(null, 10);
-                    if (ignoredMaterials.contains(block.getType())) continue;
-                    playVisualEffect(block.getLocation());
+                    switch (Wand.getWandData(player.getInventory().getItemInMainHand())) {
+                        case Ok<ParsedWandData, Exception> ok -> {
+                            Block block = player.getTargetBlock(null, 10);
+                            if (ignoredMaterials.contains(block.getType())) continue;
+                            playVisualEffect(block.getLocation());
+                            player.sendMessage("Result: " + ok.value().mode() + " " + ok.value().dimensions().x + "x" + ok.value().dimensions().y);
+                        }
+                        case Err<ParsedWandData, Exception> err -> {}
+                    }
                 }
             }
         };
