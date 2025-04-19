@@ -52,7 +52,7 @@ public class VisualizationTask {
 
     public static void playVisualEffect(Block block, WandData wandData) {
         Location location = block.getLocation();
-        for (Location locationIterate : VisualizationTask.getCubeParticleLocations(block, wandData, 0.67)) {
+        for (Location locationIterate : VisualizationTask.getCubeParticleLocations(block, wandData, 0.5)) {
             location.getWorld().spawnParticle(Particle.DUST, locationIterate, 1, 0.0,0.0,0.0, new Particle.DustOptions(Color.LIME, 1f));
         }
     }
