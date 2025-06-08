@@ -1,13 +1,13 @@
 package com.playtheatria.buildersWand.commands;
 
 import com.playtheatria.buildersWand.utils.ConfigManager;
-import com.playtheatria.buildersWand.utils.Err;
-import com.playtheatria.buildersWand.utils.Ok;
-import com.playtheatria.buildersWand.utils.Result;
 import com.playtheatria.buildersWand.wand.WandData;
 import com.playtheatria.buildersWand.wand.WandMode;
 import com.playtheatria.buildersWand.wand.Wand;
 import com.playtheatria.buildersWand.wand.WandDimensions;
+import com.playtheatria.jliii.generalutils.result.Err;
+import com.playtheatria.jliii.generalutils.result.Ok;
+import com.playtheatria.jliii.generalutils.result.Result;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -35,7 +35,7 @@ public class WandGive implements CommandExecutor, TabCompleter {
                 case 1 -> {
                     switch (args[0]) {
                         case "give" -> {
-                            player.getInventory().addItem(Wand.getWand(WandMode.BLOCK, new WandDimensions(3, 3, 3)));
+                            player.getInventory().addItem(Wand.getWand(WandMode.CUBE, new WandDimensions(3, 3, 3)));
                         }
                         case "debug" -> player.sendMessage("isWand: " + Wand.getWandData(player.getInventory().getItemInMainHand()));
                         case "set" -> {

@@ -1,8 +1,8 @@
 package com.playtheatria.buildersWand.wand;
 
-import com.playtheatria.buildersWand.utils.Err;
-import com.playtheatria.buildersWand.utils.Ok;
-import com.playtheatria.buildersWand.utils.Result;
+import com.playtheatria.jliii.generalutils.result.Err;
+import com.playtheatria.jliii.generalutils.result.Ok;
+import com.playtheatria.jliii.generalutils.result.Result;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;

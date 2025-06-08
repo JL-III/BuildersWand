@@ -1,10 +1,10 @@
 package com.playtheatria.buildersWand.tasks;
 
 import com.google.common.collect.Lists;
-import com.playtheatria.buildersWand.utils.Err;
-import com.playtheatria.buildersWand.utils.Ok;
 import com.playtheatria.buildersWand.wand.Wand;
 import com.playtheatria.buildersWand.wand.WandData;
+import com.playtheatria.jliii.generalutils.result.Err;
+import com.playtheatria.jliii.generalutils.result.Ok;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;

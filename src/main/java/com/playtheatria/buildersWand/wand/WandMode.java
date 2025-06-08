@@ -1,11 +1,11 @@
 package com.playtheatria.buildersWand.wand;
 
 public enum WandMode {
-    BLOCK,
-    SPHERE,
-    CYLINDER,
     CUBE,
-    SPHERE_HOLLOW,
-    CYLINDER_HOLLOW,
     CUBE_HOLLOW,
+    SPHERE,
+    SPHERE_HOLLOW,
+    CYLINDER,
+    CYLINDER_HOLLOW,
+    SNOW_BLOWER,
 }

@@ -1,11 +1,11 @@
 package com.playtheatria.buildersWand.listeners;
 
-import com.playtheatria.buildersWand.utils.Err;
-import com.playtheatria.buildersWand.utils.Ok;
-import com.playtheatria.buildersWand.utils.Result;
 import com.playtheatria.buildersWand.wand.Wand;
 import com.playtheatria.buildersWand.wand.WandData;
 import com.playtheatria.buildersWand.workload.DistributedFiller;
+import com.playtheatria.jliii.generalutils.result.Err;
+import com.playtheatria.jliii.generalutils.result.Ok;
+import com.playtheatria.jliii.generalutils.result.Result;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;

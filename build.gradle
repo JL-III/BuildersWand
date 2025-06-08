@@ -1,10 +1,22 @@
 plugins {
     id 'java'
     id("xyz.jpenilla.run-paper") version "2.3.1"
+    id 'com.gradleup.shadow' version '9.0.0-beta4'
+}
+
+shadowJar {
+    archiveClassifier.set('')
+    relocate 'com.playtheatria.jl-iii.generalutils', 'com.playtheatria.builderswand.shaded.generalutils'
+}
+
+tasks.build {
+    dependsOn shadowJar
 }
 
 group = 'com.playtheatria'
 version = 'v0.0.1-alpha.1'
+
+ext.generalUtilsVersion = 'v2.0.0-alpha.10'
 
 repositories {
     mavenCentral()
@@ -16,10 +28,19 @@ repositories {
         name = "sonatype"
         url = "https://oss.sonatype.org/content/groups/public/"
     }
+    maven {
+        name = "GitHubPackages"
+        url = "https://maven.pkg.github.com/JL-III/GeneralUtils"
+        credentials {
+            username = project.findProperty("gpr.user") ?: System.getenv("GITHUB_ACTOR")
+            password = project.findProperty("gpr.key") ?: System.getenv("GITHUB_TOKEN")
+        }
+    }
 }
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
+    implementation "com.playtheatria.jl-iii:generalutils:${generalUtilsVersion}"
 }
 
 tasks {
