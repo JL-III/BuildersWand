@@ -2,6 +2,7 @@ name: BuildersWand
 version: 'v0.0.1-alpha.1'
 main: com.playtheatria.buildersWand.BuildersWand
 api-version: '1.21'
+depend: [WorldGuard]
 commands:
   wand:
     description: Gives the player a Builders Wand

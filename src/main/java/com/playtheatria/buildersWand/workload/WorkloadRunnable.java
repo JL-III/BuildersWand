@@ -1,7 +1,6 @@
 package com.playtheatria.buildersWand.workload;
 
 import com.playtheatria.buildersWand.utils.ConfigManager;
-import org.bukkit.Bukkit;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -13,22 +12,19 @@ public class WorkloadRunnable implements Runnable {
         this.configManager = configManager;
     }
 
-    private final Deque<Workload> workloadDeque = new ArrayDeque<>();
+    private final Deque<Workload> workloadArrayDeque = new ArrayDeque<>();
 
-    public void addWorkload(Workload workload) {
-        this.workloadDeque.add(workload);
+    public void addWorkload(Workload setBlockWorkload) {
+        this.workloadArrayDeque.add(setBlockWorkload);
     }
 
     @Override
     public void run() {
         long stopTime = System.nanoTime() + (int) (configManager.maxMillisecondsPerTick * 1E6);
-        Workload nextLoad;
+        Workload workload;
 
-        while (System.nanoTime() <= stopTime && (nextLoad = this.workloadDeque.poll()) != null) {
-            nextLoad.compute();
-            Bukkit.getOnlinePlayers().forEach(player -> {
-                player.sendMessage("WorkloadRunnable running - maxmillispertick: " + configManager.maxMillisecondsPerTick);
-            });
+        while (System.nanoTime() <= stopTime && (workload = this.workloadArrayDeque.poll()) != null) {
+            workload.compute();
         }
     }
 }

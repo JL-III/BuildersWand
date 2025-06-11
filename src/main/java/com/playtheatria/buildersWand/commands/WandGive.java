@@ -87,8 +87,8 @@ public class WandGive implements CommandExecutor, TabCompleter {
                             return true;
                         }
 
-                        if (x > 9 || y > 9 || z > 9) {
-                            player.sendMessage("Dimensions must be less than or equal to 9.");
+                        if (x > 3 || y > 3 || z > 3) {
+                            player.sendMessage("Dimensions must be less than or equal to 3.");
                             return true;
                         }
 
@@ -96,7 +96,7 @@ public class WandGive implements CommandExecutor, TabCompleter {
                         switch (parsedWandDataExceptionResult) {
                             case Ok<WandData, Exception> ok -> {
                                 player.getInventory().setItemInMainHand(Wand.getWand(mode, new WandDimensions(x, y, z)));
-                                player.sendMessage("Wand set to " + mode + " with dimensions " + x + "x" + y + "x" + z);
+                                player.sendMessage("Wand set to " + mode + " with dimensions x: " + x + " y: " + y + " z: " + z);
                             }
                             case Err<WandData, Exception> err -> {
                                 player.sendMessage("You must hold a wand to set its dimensions.");

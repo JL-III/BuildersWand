@@ -1,10 +1,14 @@
 package com.playtheatria.buildersWand.tasks;
 
 import com.google.common.collect.Lists;
+import com.playtheatria.buildersWand.utils.BoundingBox;
 import com.playtheatria.buildersWand.wand.Wand;
 import com.playtheatria.buildersWand.wand.WandData;
+import com.playtheatria.buildersWand.workload.DistributedFiller;
 import com.playtheatria.jliii.generalutils.result.Err;
 import com.playtheatria.jliii.generalutils.result.Ok;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -40,9 +44,14 @@ public class VisualizationTask {
                         case Ok<WandData, Exception> ok -> {
                             Block block = player.getTargetBlock(null, 16);
                             if (ignoredMaterials.contains(block.getType())) continue;
-                            playVisualEffect(block, ok.value());
+                            playVisualEffect(block, player, ok.value());
                         }
-                        case Err<WandData, Exception> err -> {}
+                        case Err<WandData, Exception> err -> {
+                            Bukkit.getConsoleSender().sendMessage(
+                                    Component.text("Error getting wand data: " + err.error().getMessage())
+                                            .color(NamedTextColor.DARK_RED)
+                            );
+                        }
                     }
                 }
             }
@@ -50,11 +59,10 @@ public class VisualizationTask {
         return bukkitRunnable.runTaskTimer(plugin, 20, 30).getTaskId();
     }
 
-    public static void playVisualEffect(Block block, WandData wandData) {
-        Location location = block.getLocation();
-        for (Location locationIterate : VisualizationTask.getCubeParticleLocations(block, wandData, 0.5)) {
-            location.getWorld().spawnParticle(Particle.DUST, locationIterate, 1, 0.0,0.0,0.0, new Particle.DustOptions(Color.LIME, 1f));
-        }
+    public static void playVisualEffect(Block block, Player player, WandData wandData) {
+        List<Location> locations =  DistributedFiller.getBlockLocations(block, player, wandData);
+        BoundingBox boundingBox = new BoundingBox(locations);
+        BoundingBox.drawBoundingBoxOutline(boundingBox.getMinCorner(), boundingBox.getMaxCorner(), Particle.DUST, 0.5, player);
     }
 
     public static List<Location> getCubeParticleLocations(Block block, WandData wandData, double particleDistance) {
@@ -73,19 +81,12 @@ public class VisualizationTask {
         for (double x = minX; x <= maxX; x = Math.round((x + particleDistance) * 1e2) / 1e2) {
             for (double y = minY; y <= maxY; y = Math.round((y + particleDistance) * 1e2) / 1e2) {
                 for (double z = minZ; z <= maxZ; z = Math.round((z + particleDistance) * 1e2) / 1e2) {
-                    int components = 0;
-                    if (x == minX || x == maxX) components++;
-                    if (y == minY || y == maxY) components++;
-                    if (z == minZ || z == maxZ) components++;
-                    if (components >= 2) {
+                    if ((x == minX || x == maxX) && (y == minY || y == maxY) && (z == minZ || z == maxZ)) {
                         particleLocations.add(new Location(world, x, y, z));
                     }
                 }
             }
         }
-        Bukkit.getOnlinePlayers().forEach(player -> {
-            player.sendMessage("Particle locations size: " + particleLocations.size());
-        });
         return particleLocations;
     }
 }
