@@ -6,9 +6,15 @@ import com.playtheatria.buildersWand.utils.Result;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.FluidCollisionMode;
+import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
+import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.util.RayTraceResult;
 
 import java.util.List;
 import java.util.regex.Matcher;
@@ -106,5 +112,31 @@ public class Wand {
         if (loreList == null) return new Err<>(new Exception("Lore list is null"));
         if (loreList.size() < 3) return new Err<>(new Exception(String.format("Lore list is not large enough to be a builder wand. Size: %s", loreList.size())));
         return new Ok<>(PlainTextComponentSerializer.plainText().serialize(loreList.get(index)));
+    }
+
+    public static Result<Block, Exception> getTargetBlock(Player player, int maxDistance) {
+        Location eyeLocation = player.getEyeLocation();
+        RayTraceResult rayTraceResult = player.getWorld().rayTraceBlocks(
+                eyeLocation,
+                eyeLocation.getDirection(),
+                maxDistance,
+                FluidCollisionMode.NEVER,
+                true // ignore passable blocks
+        );
+
+        if (rayTraceResult != null && rayTraceResult.getHitBlockFace() != null) {
+            Block hitBlock = rayTraceResult.getHitBlock();
+            BlockFace hitFace = rayTraceResult.getHitBlockFace();
+
+            if (hitBlock == null) {
+                return new Err<>(new Exception("No block hit"));
+            }
+
+            if (hitFace == BlockFace.UP) {
+                return new Ok<>(hitBlock); // if the face is SELF, return the block itself
+            }
+        }
+
+        return new Err<>(new Exception("no valid face found")); // no valid face found
     }
 }

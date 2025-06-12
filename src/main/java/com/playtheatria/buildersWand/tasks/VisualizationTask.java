@@ -38,16 +38,23 @@ public class VisualizationTask {
 
                     switch (Wand.getWandData(player.getInventory().getItemInMainHand())) {
                         case Ok<WandData, Exception> ok -> {
-                            Block block = player.getTargetBlock(null, 16);
-                            if (ignoredMaterials.contains(block.getType())) continue;
-                            playVisualEffect(block, ok.value());
+                            switch (Wand.getTargetBlock(player, 16)) {
+                                case Ok<Block, Exception> blockOk -> {
+                                    Block block = blockOk.value();
+                                    if (ignoredMaterials.contains(block.getType())) continue;
+                                    playVisualEffect(block, ok.value());
+                                }
+                                case Err<Block, Exception> err -> {
+                                    // No valid target block found, do nothing
+                                }
+                            }
                         }
                         case Err<WandData, Exception> err -> {}
                     }
                 }
             }
         };
-        return bukkitRunnable.runTaskTimer(plugin, 20, 30).getTaskId();
+        return bukkitRunnable.runTaskTimer(plugin, 20, 20).getTaskId();
     }
 
     public static void playVisualEffect(Block block, WandData wandData) {

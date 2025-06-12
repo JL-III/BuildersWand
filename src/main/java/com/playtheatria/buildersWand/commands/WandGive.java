@@ -35,7 +35,7 @@ public class WandGive implements CommandExecutor, TabCompleter {
                 case 1 -> {
                     switch (args[0]) {
                         case "give" -> {
-                            player.getInventory().addItem(Wand.getWand(WandMode.BLOCK, new WandDimensions(3, 3, 3)));
+                            player.getInventory().addItem(Wand.getWand(WandMode.CUBE, new WandDimensions(3, 3, 3)));
                         }
                         case "debug" -> player.sendMessage("isWand: " + Wand.getWandData(player.getInventory().getItemInMainHand()));
                         case "set" -> {
@@ -87,8 +87,8 @@ public class WandGive implements CommandExecutor, TabCompleter {
                             return true;
                         }
 
-                        if (x > 9 || y > 9 || z > 9) {
-                            player.sendMessage("Dimensions must be less than or equal to 9.");
+                        if (x > 5 || y > 5 || z > 5) {
+                            player.sendMessage("Dimensions must be less than or equal to 5.");
                             return true;
                         }
 
@@ -96,7 +96,7 @@ public class WandGive implements CommandExecutor, TabCompleter {
                         switch (parsedWandDataExceptionResult) {
                             case Ok<WandData, Exception> ok -> {
                                 player.getInventory().setItemInMainHand(Wand.getWand(mode, new WandDimensions(x, y, z)));
-                                player.sendMessage("Wand set to " + mode + " with dimensions " + x + "x" + y + "x" + z);
+                                player.sendMessage("Wand set to " + mode + " with dimensions x: " + x + " y: " + y + " z: " + z);
                             }
                             case Err<WandData, Exception> err -> {
                                 player.sendMessage("You must hold a wand to set its dimensions.");
@@ -138,7 +138,7 @@ public class WandGive implements CommandExecutor, TabCompleter {
             }
             case 3,4 -> {
                 if (args[0].equals("set")) {
-                    return List.of("1", "2", "3", "4", "5", "6", "7", "8", "9");
+                    return List.of("1", "2", "3", "4", "5");
                 }
             }
 
