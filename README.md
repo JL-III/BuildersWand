@@ -59,7 +59,8 @@ builds as many cells as you can afford — in placement order — and leaves the
 
 ## Permissions
 
-- `builderswand.use` — use the wand and `/wand form`. Default **true**.
+- `builderswand.use` — use the wand and `/wand form`. Default **false** (grant it to let a
+  player use the wand; with `false`, ops don't get it automatically either).
 - `builderswand.give` — `/wand give`. Default **op**.
 
 ## Configuration (`config.yml`)
