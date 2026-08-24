@@ -198,13 +198,14 @@ public final class GhostService {
         if (session.stage() >= session.form.lockStages()) {
             return "RIGHT prints · LEFT cancels";
         }
-        return switch (session.form) {
+        String locks = switch (session.form) {
             case CYLINDER, SPHERE -> "RIGHT locks radius";
             case DIAGONAL -> "RIGHT locks width";
             case BOX -> session.orientation.wall()
                     ? (session.stage() == 0 ? "RIGHT locks width" : "RIGHT locks height")
                     : (session.stage() == 0 ? "RIGHT locks length" : "RIGHT locks width");
         };
+        return locks + " · LEFT cancels";
     }
 
     private static String capitalize(String text) {

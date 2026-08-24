@@ -98,8 +98,20 @@ public final class GestureListener implements Listener {
         }
         if (action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK) {
             event.setCancelled(true);
-            handleRightClick(player, item);
+            if (player.isSneaking()) {
+                cycleForm(player, item);
+            } else {
+                handleRightClick(player, item);
+            }
         }
+    }
+
+    private void cycleForm(Player player, ItemStack wand) {
+        Form[] forms = Form.values();
+        Form next = forms[(wandItems.getForm(wand).ordinal() + 1) % forms.length];
+        wandItems.setForm(wand, next);
+        clearSession(player); // form change drops the anchor (design §5.1)
+        player.sendActionBar(Component.text("Form: " + next.key()));
     }
 
     private void handleRightClick(Player player, ItemStack wand) {

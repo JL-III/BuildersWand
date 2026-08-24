@@ -35,8 +35,6 @@ import java.util.Optional;
  */
 public final class LivePlan {
 
-    private static final int STRETCH_FALLBACK = 64; // design §7.4 step 3
-
     private LivePlan() {
     }
 
@@ -76,7 +74,7 @@ public final class LivePlan {
             return Optional.empty();
         }
         Reading reading = read(player, session, config);
-        List<BlockVector> offsets = Expansion.cells(session.form, reading.dims(), session.orientation);
+        List<BlockVector> offsets = Expansion.cells(session.form, reading.dims(), reading.orientation());
         List<Location> cells = new ArrayList<>(offsets.size());
         BlockVector base = reading.effectiveAnchor();
         for (BlockVector off : offsets) {
@@ -102,7 +100,11 @@ public final class LivePlan {
         switch (session.form) {
             case CYLINDER -> session.lock1 = Measurement.radiusStep(offL, offSV, 9);
             case SPHERE -> session.lock1 = Measurement.radiusStep(offL, offSV, 7);
-            case DIAGONAL -> session.lock1 = clampExtent(offL, 5);
+            case DIAGONAL -> {
+                // Lock the tread line's axis (dominant drag) and its width.
+                session.firstAxisLateral = Math.abs(offL) >= Math.abs(offSV);
+                session.lock1 = session.firstAxisLateral ? clampExtent(offL, 5) : clampExtent(offSV, 5);
+            }
             case BOX -> {
                 if (session.stage() == 0) {
                     // Lock the drawn line's axis (dominant drag) and its length.
@@ -130,7 +132,7 @@ public final class LivePlan {
             case BOX -> readBox(aim, session, o, anchor, offL, offSV);
             case CYLINDER -> readCylinder(aim, session, o, anchor, offL, offSV);
             case SPHERE -> readSphere(aim, session, o, anchor, offL, offSV);
-            case DIAGONAL -> readDiagonal(aim, session, o, anchor, offL);
+            case DIAGONAL -> readDiagonal(aim, session, o, anchor, offL, offSV);
         };
     }
 
@@ -164,25 +166,25 @@ public final class LivePlan {
             nExtent = clampExtent(cellOffset(nTarget, inPlaneAnchor, o.n()), 8);
         }
         BlockVector effAnchor = shift(inPlaneAnchor, o.n(), Measurement.negativeAnchorShift(nExtent));
-        return new Reading(new Dims(Math.abs(lExtent), Math.abs(svExtent), Math.abs(nExtent)), effAnchor);
+        return new Reading(new Dims(Math.abs(lExtent), Math.abs(svExtent), Math.abs(nExtent)), effAnchor, o);
     }
 
     private static Reading readCylinder(Aim aim, GestureSession s, Orientation o, BlockVector anchor, int offL, int offSV) {
         int step = s.lock1 != null ? s.lock1 : Measurement.radiusStep(offL, offSV, 9);
         if (s.lock1 == null) {
-            return new Reading(new Dims(step, 1, 1), anchor); // circle centered, no anchor shift
+            return new Reading(new Dims(step, 1, 1), anchor, o); // circle centered, no anchor shift
         }
         Vector nTarget = aim.point(center(anchor), vec(o.s()));
         int nExtent = clampExtent(cellOffset(nTarget, anchor, o.n()), 8);
         int courses = Math.abs(nExtent);
         BlockVector effAnchor = shift(anchor, o.n(), Measurement.negativeAnchorShift(nExtent));
-        return new Reading(new Dims(step, courses, 1), effAnchor);
+        return new Reading(new Dims(step, courses, 1), effAnchor, o);
     }
 
     private static Reading readSphere(Aim aim, GestureSession s, Orientation o, BlockVector anchor, int offL, int offSV) {
         int step = s.lock1 != null ? s.lock1 : Measurement.radiusStep(offL, offSV, 7);
         if (s.lock1 == null) {
-            return new Reading(new Dims(step, 1, 1), anchor);
+            return new Reading(new Dims(step, 1, 1), anchor, o);
         }
         Vector nTarget = aim.point(center(anchor), vec(o.s()));
         int nExtent = clampExtent(cellOffset(nTarget, anchor, o.n()), 8);
@@ -193,52 +195,67 @@ public final class LivePlan {
         }
         int signedLength = nExtent < 0 ? -length : length;
         BlockVector effAnchor = shift(anchor, o.n(), Measurement.negativeAnchorShift(signedLength));
-        return new Reading(new Dims(step, length, 1), effAnchor);
+        return new Reading(new Dims(step, length, 1), effAnchor, o);
     }
 
-    private static Reading readDiagonal(Aim aim, GestureSession s, Orientation o, BlockVector anchor, int offL) {
-        int widthExtent = s.lock1 != null ? s.lock1 : clampExtent(offL, 5);
-        BlockVector inPlaneAnchor = shift(anchor, o.l(), Measurement.negativeAnchorShift(widthExtent));
-        int run = 1;
-        if (s.lock1 != null) {
-            Vector nTarget = aim.point(center(inPlaneAnchor), vec(o.s()));
-            int offN = cellOffset(nTarget, inPlaneAnchor, o.n());
-            run = Math.min(8, Math.abs(Measurement.extentFromOffset(offN)));
+    private static Reading readDiagonal(Aim aim, GestureSession s, Orientation o, BlockVector anchor, int offL, int offSV) {
+        // Stage 0 draws the tread as a directional line (dominant drag), like the box; the run
+        // then climbs perpendicular to the tread, rising one block per step (design §6.2/§7.5).
+        boolean treadLateral;
+        int treadExtent;
+        if (s.stage() == 0) {
+            treadLateral = Math.abs(offL) >= Math.abs(offSV);
+            treadExtent = treadLateral ? clampExtent(offL, 5) : clampExtent(offSV, 5);
+        } else {
+            treadLateral = s.firstAxisLateral;
+            treadExtent = s.lock1;
         }
-        return new Reading(new Dims(run, Math.abs(widthExtent), 1), inPlaneAnchor);
+        BlockVector treadAxis = treadLateral ? o.l() : o.s();
+        BlockVector perpAxis = treadLateral ? o.s() : o.l();
+        BlockVector effAnchor = shift(anchor, treadAxis, Measurement.negativeAnchorShift(treadExtent));
+
+        int run = 1;
+        BlockVector climb = perpAxis;
+        if (s.stage() >= 1) {
+            Vector target = aim.point(center(effAnchor), vec(o.n()));
+            int runExtent = clampExtent(cellOffset(target, effAnchor, perpAxis), 8);
+            run = Math.abs(runExtent);
+            if (runExtent < 0) {
+                climb = new BlockVector(-perpAxis.getBlockX(), -perpAxis.getBlockY(), -perpAxis.getBlockZ());
+            }
+        }
+        // Effective orientation for §6.2: tread along L', run rises along S'(=climb) and N.
+        Orientation eff = new Orientation(treadAxis, climb, o.n(), o.wall(), o.heading());
+        return new Reading(new Dims(run, Math.abs(treadExtent), 1), effAnchor, eff);
     }
 
     // ------------------------------------------------------------------ aim helpers (design §7.4)
 
-    private record Aim(Vector eye, Vector direction, RayTraceResult hit) {
+    private record Aim(Vector eye, Vector direction, double reach) {
         static Aim of(Player player, PluginConfig config) {
-            Location eye = player.getEyeLocation();
-            RayTraceResult hit = player.rayTraceBlocks(config.anchorReach, FluidCollisionMode.NEVER);
-            return new Aim(eye.toVector(), eye.getDirection(), hit);
+            Location eyeLoc = player.getEyeLocation();
+            return new Aim(eyeLoc.toVector(), eyeLoc.getDirection(), config.anchorReach);
         }
 
-        /** The aim target point for a measurement plane (design §7.4 priority order). */
+        /**
+         * The aim target in a measurement plane: where the eye ray crosses the plane, bounded
+         * to reach. It never snaps to the block under the crosshair and never lets a
+         * near-parallel (near-horizontal) look send the crossing to infinity — so terrain steps
+         * and horizontal looks can't make the measured extent jump or skip values.
+         */
         Vector point(Vector planeOrigin, Vector planeNormal) {
-            if (hit != null && hit.getHitBlock() != null) {
-                Block block = hit.getHitBlock();
-                return new Vector(block.getX() + 0.5, block.getY() + 0.5, block.getZ() + 0.5);
-            }
             double denom = direction.dot(planeNormal);
-            if (Math.abs(denom) > 1e-6) {
+            if (Math.abs(denom) > 1e-4) {
                 double t = planeOrigin.clone().subtract(eye).dot(planeNormal) / denom;
                 if (t > 0) {
-                    return eye.clone().add(direction.clone().multiply(t));
+                    return eye.clone().add(direction.clone().multiply(Math.min(t, reach)));
                 }
             }
-            Vector projected = direction.clone().subtract(planeNormal.clone().multiply(direction.dot(planeNormal)));
-            if (projected.lengthSquared() > 1e-9) {
-                return planeOrigin.clone().add(projected.normalize().multiply(STRETCH_FALLBACK));
-            }
-            return planeOrigin.clone();
+            return eye.clone().add(direction.clone().multiply(reach));
         }
     }
 
-    private record Reading(Dims dims, BlockVector effectiveAnchor) {
+    private record Reading(Dims dims, BlockVector effectiveAnchor, Orientation orientation) {
     }
 
     private static int cellOffset(Vector target, BlockVector anchor, BlockVector axis) {
