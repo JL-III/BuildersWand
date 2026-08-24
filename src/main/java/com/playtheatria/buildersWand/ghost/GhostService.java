@@ -75,8 +75,9 @@ public final class GhostService {
 
     private void update(Player player) {
         ItemStack mainHand = player.getInventory().getItemInMainHand();
-        if (!wandItems.isWand(mainHand) || waveRunner.hasActiveWave(player)) {
-            clearFor(player); // no wand, or suppress during the player's own wave
+        if (!wandItems.isWand(mainHand) || !player.hasPermission(WandItems.PERMISSION_USE)
+                || waveRunner.hasActiveWave(player)) {
+            clearFor(player); // no wand, no permission, or suppress during the player's own wave
             return;
         }
         Form form = wandItems.getForm(mainHand);

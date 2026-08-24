@@ -73,10 +73,11 @@ public final class GestureListener implements Listener {
     @EventHandler
     public void onInteract(PlayerInteractEvent event) {
         Player player = event.getPlayer();
+        boolean canUse = player.hasPermission(WandItems.PERMISSION_USE);
         // The off-hand interaction fires as its own event; cancel it so the material block in
-        // the off hand is never placed while a wand is held in the main hand.
+        // the off hand is never placed while a usable wand is held in the main hand.
         if (event.getHand() == EquipmentSlot.OFF_HAND) {
-            if (wandItems.isWand(player.getInventory().getItemInMainHand())) {
+            if (canUse && wandItems.isWand(player.getInventory().getItemInMainHand())) {
                 event.setCancelled(true);
             }
             return;
@@ -85,8 +86,8 @@ public final class GestureListener implements Listener {
             return; // mandatory guard against the double-fire
         }
         ItemStack item = event.getItem();
-        if (!wandItems.isWand(item)) {
-            return;
+        if (!wandItems.isWand(item) || !canUse) {
+            return; // no permission → the wand is an inert stick
         }
         Action action = event.getAction();
         if (action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK) {

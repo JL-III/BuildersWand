@@ -51,7 +51,7 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean give(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("builderswand.give")) {
+        if (!sender.hasPermission(WandItems.PERMISSION_GIVE)) {
             sender.sendMessage(Component.text("You don't have permission to use the Builders Wand.", NamedTextColor.RED));
             return true;
         }
@@ -76,7 +76,7 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
     }
 
     private boolean form(CommandSender sender, String[] args) {
-        if (!sender.hasPermission("builderswand.use")) {
+        if (!sender.hasPermission(WandItems.PERMISSION_USE)) {
             sender.sendMessage(Component.text("You don't have permission to use the Builders Wand.", NamedTextColor.RED));
             return true;
         }
