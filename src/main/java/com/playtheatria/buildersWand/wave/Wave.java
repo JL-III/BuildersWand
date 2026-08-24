@@ -11,10 +11,9 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * One in-flight print (design §10.1). {@code completed}/{@code reserved} track progress and
- * unspent feedstock; the invariant {@code reserved == printable.size() − completed} holds for
- * non-creative waves. {@code ticksUntilNext} is the per-wave cadence phase for the shared
- * 1-tick runner task.
+ * One in-flight print (design §10.1). {@code completed} counts placed cells; feedstock is spent
+ * one item per cell as the wave runs (no up-front reserve, so nothing to refund on a stop).
+ * {@code ticksUntilNext} is the per-wave cadence phase for the shared 1-tick runner task.
  */
 public final class Wave {
 
@@ -28,11 +27,10 @@ public final class Wave {
     public final boolean creative;
 
     public int completed;
-    public int reserved;
     public int ticksUntilNext;
 
     public Wave(UUID owner, World world, Material material, BlockData blockData, List<Location> printable,
-                int ticksPerCell, Set<Chunk> tickets, boolean creative, int reserved) {
+                int ticksPerCell, Set<Chunk> tickets, boolean creative) {
         this.owner = owner;
         this.world = world;
         this.material = material;
@@ -41,7 +39,6 @@ public final class Wave {
         this.ticksPerCell = ticksPerCell;
         this.tickets = tickets;
         this.creative = creative;
-        this.reserved = reserved;
         this.completed = 0;
         this.ticksUntilNext = ticksPerCell;
     }

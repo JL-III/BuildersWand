@@ -118,25 +118,10 @@ public final class WaveRunner {
 
         // 8. (Single removed) — all forms push bodies clear mid-wave (§10.4) rather than refuse.
 
-        // 9. Feedstock — build as many cells as the player can afford (partial build).
+        // 9. Feedstock is spent one item per cell while the wave runs (never reserved up front),
+        //    so the wave attempts every printable cell and stops if the material runs out.
         boolean creative = player.getGameMode() == GameMode.CREATIVE;
         int need = printable.size();
-        int toBuild = need;
-        int reserved = 0;
-        if (!creative) {
-            int have = Feedstock.count(player.getInventory(), material, wandItems);
-            toBuild = Math.min(have, need);
-            if (toBuild == 0) {
-                player.sendMessage(red("You need at least one " + WandItems.materialDisplayName(material) + " to print. Nothing changed or spent."));
-                return false;
-            }
-            Feedstock.reserve(player.getInventory(), material, toBuild, wandItems);
-            reserved = toBuild;
-        }
-        // Only the first `toBuild` printable cells (emission order) are placed; the rest are dropped.
-        List<Location> toPrint = toBuild < printable.size()
-                ? new ArrayList<>(printable.subList(0, toBuild))
-                : printable;
 
         // 10. Start the wave: chunk tickets over the plan, register, schedule
         Set<Chunk> tickets = new HashSet<>();
@@ -146,19 +131,14 @@ public final class WaveRunner {
                 chunk.addPluginChunkTicket(plugin);
             }
         }
-        int ticksPerCell = toBuild <= config.smallPrintMaxCells
+        int ticksPerCell = need <= config.smallPrintMaxCells
                 ? config.smallPrintTicksPerCell
                 : config.largePrintTicksPerCell;
-        waves.put(id, new Wave(id, plan.world(), material, plan.blockData(), toPrint, ticksPerCell, tickets, creative, reserved));
+        waves.put(id, new Wave(id, plan.world(), material, plan.blockData(), printable, ticksPerCell, tickets, creative));
         ensureTask();
 
-        if (toBuild < need) {
-            player.sendMessage(Component.text("Printing " + plan.form().key() + ": " + toBuild + " of " + need
-                    + " cells (" + kept + " kept, short " + (need - toBuild) + ").", NamedTextColor.GREEN));
-        } else {
-            player.sendMessage(Component.text("Printing " + plan.form().key() + ": " + need
-                    + " cells (" + kept + " kept).", NamedTextColor.GREEN));
-        }
+        player.sendMessage(Component.text("Printing " + plan.form().key() + ": " + need
+                + " cells (" + kept + " kept).", NamedTextColor.GREEN));
         return true;
     }
 
@@ -191,25 +171,10 @@ public final class WaveRunner {
             return;
         }
 
-        if (!wave.creative && wave.reserved != wave.total() - wave.completed) {
-            plugin.getLogger().severe("Wave invariant violated for " + wave.owner + ": reserved="
-                    + wave.reserved + ", printable=" + wave.total() + ", completed=" + wave.completed
-                    + "; stopping and refunding.");
-            if (wave.reserved > 0) {
-                Feedstock.refund(player, wave.material, wave.reserved);
-            }
-            releaseTickets(wave);
-            waves.remove(wave.owner);
-            player.sendMessage(Component.text(wave.completed + "/" + wave.total()
-                    + " cells placed; an internal error occurred. The unplaced blocks were refunded.",
-                    NamedTextColor.GOLD));
-            return;
-        }
-
         Location loc = wave.printable.get(wave.completed);
         Block block = loc.getBlock();
 
-        // 1. Protection re-check
+        // 1. Protection re-check (stops before spending — nothing is lost)
         if (!protection.canBuild(player, loc)) {
             stop(wave, player, StopReason.PERMISSION_LOST, loc);
             return;
@@ -224,14 +189,16 @@ public final class WaveRunner {
             stop(wave, player, StopReason.BODY_STUCK, loc);
             return;
         }
-        // 4. Place the oriented state with physics, then play the placed block's sound
+        // 4. Spend one item BEFORE placing — remove-then-place, so a block is never free.
+        if (!wave.creative && !Feedstock.spendOne(player.getInventory(), wave.material, wandItems)) {
+            stop(wave, player, StopReason.OUT_OF_MATERIAL, null);
+            return;
+        }
+        // 5. Place the oriented state with physics, then play the placed block's sound
         block.setBlockData(wave.blockData, true);
         wave.world.playSound(loc, block.getBlockSoundGroup().getPlaceSound(), 1.0f, 1.0f);
-        // 5. Account
+        // 6. Account
         wave.completed++;
-        if (!wave.creative) {
-            wave.reserved--;
-        }
         if (wave.completed >= wave.total()) {
             settle(wave, player);
         }
@@ -289,7 +256,7 @@ public final class WaveRunner {
 
     // ---------------------------------------------------------------- stop / settle
 
-    /** Stop this player's wave (design §10.3), refunding the unspent remainder. */
+    /** Stop this player's wave (design §10.3); unspent feedstock stays in the inventory. */
     public void stopFor(Player player, StopReason reason) {
         Wave wave = waves.get(player.getUniqueId());
         if (wave != null) {
@@ -312,14 +279,12 @@ public final class WaveRunner {
     }
 
     private void stop(Wave wave, Player player, StopReason reason, Location at) {
-        if (!wave.creative && wave.reserved > 0 && player != null) {
-            Feedstock.refund(player, wave.material, wave.reserved);
-        }
+        // No refund: feedstock is spent per cell, so unspent items are still in the inventory.
         releaseTickets(wave);
         waves.remove(wave.owner);
         if (player != null) {
-            player.sendMessage(Component.text(wave.completed + "/" + wave.total() + " cells placed; "
-                    + reason.phrase(at) + ". The unplaced blocks were refunded.", NamedTextColor.GOLD));
+            player.sendMessage(Component.text(wave.completed + "/" + wave.total()
+                    + " cells placed; " + reason.phrase(at) + ".", NamedTextColor.GOLD));
         }
         stopTaskIfIdle();
     }
