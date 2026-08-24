@@ -108,7 +108,7 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
         if (sender instanceof Player player) {
             ItemStack mainHand = player.getInventory().getItemInMainHand();
             if (wandItems.isWand(mainHand)) {
-                sender.sendMessage(Component.text("Form: " + wandItems.getForm(mainHand).key(), NamedTextColor.GOLD));
+                sender.sendMessage(Component.text("Form: " + wandItems.getForm(mainHand).label(), NamedTextColor.GOLD));
             } else {
                 sender.sendMessage(Component.text("Not holding a Builders Wand.", NamedTextColor.GRAY));
             }

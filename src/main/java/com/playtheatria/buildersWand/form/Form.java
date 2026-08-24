@@ -28,6 +28,12 @@ public enum Form {
         return name().toLowerCase(Locale.ROOT);
     }
 
+    /** Capitalised display label, e.g. {@code "Box"}. */
+    public String label() {
+        String key = key();
+        return Character.toUpperCase(key.charAt(0)) + key.substring(1);
+    }
+
     public static Optional<Form> fromKey(String key) {
         if (key == null) {
             return Optional.empty();

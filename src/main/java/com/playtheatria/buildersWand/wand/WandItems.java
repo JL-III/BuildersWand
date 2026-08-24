@@ -38,13 +38,23 @@ public final class WandItems {
     public ItemStack createWand(Form form) {
         ItemStack item = new ItemStack(Material.STICK);
         item.editMeta(meta -> {
-            meta.itemName(Component.text("Builders Wand").color(NamedTextColor.GOLD));
+            applyName(meta, form);
             meta.lore(List.of(Component.text("A mystical wand!")));
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(wandKey, PersistentDataType.BYTE, (byte) 1);
             pdc.set(formKey, PersistentDataType.STRING, form.key());
         });
         return item;
+    }
+
+    /**
+     * Writes the current form into the item name for at-a-glance mode feedback (shown in the
+     * hotbar name popup when the wand is selected). Display only — the PDC form remains the
+     * single source of truth and is never derived from this name (design §4).
+     */
+    private static void applyName(ItemMeta meta, Form form) {
+        meta.itemName(Component.text("Builders Wand", NamedTextColor.GOLD)
+                .append(Component.text(" · " + form.label(), NamedTextColor.GRAY)));
     }
 
     /** Null-safe; true iff the PDC carries the wand key (design §4 — the only wand test). */
@@ -73,8 +83,10 @@ public final class WandItems {
     }
 
     public void setForm(ItemStack item, Form form) {
-        item.editMeta(meta ->
-                meta.getPersistentDataContainer().set(formKey, PersistentDataType.STRING, form.key()));
+        item.editMeta(meta -> {
+            meta.getPersistentDataContainer().set(formKey, PersistentDataType.STRING, form.key());
+            applyName(meta, form);
+        });
     }
 
     /**

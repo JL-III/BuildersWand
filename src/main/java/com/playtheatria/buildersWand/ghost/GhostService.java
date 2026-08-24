@@ -80,9 +80,9 @@ public final class GhostService {
         Form form = wandItems.getForm(mainHand);
         GestureSession session = gestureListener.sessionOf(player);
         if (session == null) {
-            // Un-anchored: hint on the action bar, ghost the would-be anchor cell.
-            player.sendActionBar(Component.text(
-                    wandItems.selectedMaterial(player).isEmpty() ? NO_MATERIAL : AIM_HINT));
+            // Un-anchored: form + hint on the action bar, ghost the would-be anchor cell.
+            String hint = wandItems.selectedMaterial(player).isEmpty() ? NO_MATERIAL : AIM_HINT;
+            player.sendActionBar(Component.text(form.label() + " · " + hint));
             GestureSession preview = new GestureSession();
             preview.form = form;
             syncGhosts(player, LivePlan.derive(player, preview, config, wandItems));
@@ -187,7 +187,7 @@ public final class GhostService {
         String have = player.getGameMode() == GameMode.CREATIVE
                 ? "(creative)"
                 : "(have " + Feedstock.count(player.getInventory(), plan.material(), wandItems) + ")";
-        return capitalize(session.form.key())
+        return session.form.label()
                 + " " + dims.primary() + "×" + dims.secondary() + "×" + dims.tertiary()
                 + " · " + cells + " cells, " + kept + " kept"
                 + " · " + material + " ×" + printable + " " + have
@@ -206,9 +206,5 @@ public final class GhostService {
                     : (session.stage() == 0 ? "RIGHT locks length" : "RIGHT locks width");
         };
         return locks + " · LEFT cancels";
-    }
-
-    private static String capitalize(String text) {
-        return Character.toUpperCase(text.charAt(0)) + text.substring(1);
     }
 }

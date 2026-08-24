@@ -111,7 +111,7 @@ public final class GestureListener implements Listener {
         Form next = forms[(wandItems.getForm(wand).ordinal() + 1) % forms.length];
         wandItems.setForm(wand, next);
         clearSession(player); // form change drops the anchor (design §5.1)
-        player.sendActionBar(Component.text("Form: " + next.key()));
+        // The new form shows in the wand's item name and the un-anchored action bar hint.
     }
 
     private void handleRightClick(Player player, ItemStack wand) {
