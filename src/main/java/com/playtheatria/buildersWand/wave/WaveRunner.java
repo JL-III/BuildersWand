@@ -118,19 +118,25 @@ public final class WaveRunner {
 
         // 8. (Single removed) — all forms push bodies clear mid-wave (§10.4) rather than refuse.
 
-        // 9. Feedstock
+        // 9. Feedstock — build as many cells as the player can afford (partial build).
         boolean creative = player.getGameMode() == GameMode.CREATIVE;
         int need = printable.size();
+        int toBuild = need;
         int reserved = 0;
         if (!creative) {
             int have = Feedstock.count(player.getInventory(), material, wandItems);
-            if (have < need) {
-                player.sendMessage(red("Need " + need + " " + WandItems.materialDisplayName(material) + "; have " + have + ". Nothing changed or spent."));
+            toBuild = Math.min(have, need);
+            if (toBuild == 0) {
+                player.sendMessage(red("You need at least one " + WandItems.materialDisplayName(material) + " to print. Nothing changed or spent."));
                 return false;
             }
-            Feedstock.reserve(player.getInventory(), material, need, wandItems);
-            reserved = need;
+            Feedstock.reserve(player.getInventory(), material, toBuild, wandItems);
+            reserved = toBuild;
         }
+        // Only the first `toBuild` printable cells (emission order) are placed; the rest are dropped.
+        List<Location> toPrint = toBuild < printable.size()
+                ? new ArrayList<>(printable.subList(0, toBuild))
+                : printable;
 
         // 10. Start the wave: chunk tickets over the plan, register, schedule
         Set<Chunk> tickets = new HashSet<>();
@@ -140,13 +146,19 @@ public final class WaveRunner {
                 chunk.addPluginChunkTicket(plugin);
             }
         }
-        int ticksPerCell = need <= config.smallPrintMaxCells
+        int ticksPerCell = toBuild <= config.smallPrintMaxCells
                 ? config.smallPrintTicksPerCell
                 : config.largePrintTicksPerCell;
-        waves.put(id, new Wave(id, plan.world(), material, plan.blockData(), printable, ticksPerCell, tickets, creative, reserved));
+        waves.put(id, new Wave(id, plan.world(), material, plan.blockData(), toPrint, ticksPerCell, tickets, creative, reserved));
         ensureTask();
 
-        player.sendMessage(Component.text("Printing " + plan.form().key() + ": " + need + " cells (" + kept + " kept).", NamedTextColor.GREEN));
+        if (toBuild < need) {
+            player.sendMessage(Component.text("Printing " + plan.form().key() + ": " + toBuild + " of " + need
+                    + " cells (" + kept + " kept, short " + (need - toBuild) + ").", NamedTextColor.GREEN));
+        } else {
+            player.sendMessage(Component.text("Printing " + plan.form().key() + ": " + need
+                    + " cells (" + kept + " kept).", NamedTextColor.GREEN));
+        }
         return true;
     }
 

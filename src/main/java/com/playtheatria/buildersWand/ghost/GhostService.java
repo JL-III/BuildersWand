@@ -11,7 +11,9 @@ import com.playtheatria.buildersWand.wave.Feedstock;
 import com.playtheatria.buildersWand.wave.Plan;
 import com.playtheatria.buildersWand.wave.WaveRunner;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
+import org.bukkit.Color;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -43,6 +45,7 @@ public final class GhostService {
 
     private static final String NO_MATERIAL = "Hold a placeable block in your off hand to choose the material.";
     private static final String AIM_HINT = "Aim at a surface; RIGHT-CLICK anchors there.";
+    private static final Color UNAFFORDABLE = Color.fromRGB(0xFF, 0x2D, 0x2D); // cells you can't afford
 
     private final JavaPlugin plugin;
     private final PluginConfig config;
@@ -78,13 +81,15 @@ public final class GhostService {
         }
         Form form = wandItems.getForm(mainHand);
         GestureSession session = gestureListener.sessionOf(player);
+        boolean creative = player.getGameMode() == GameMode.CREATIVE;
         if (session == null) {
             // Un-anchored: form + hint on the action bar, ghost the would-be anchor cell.
             String hint = wandItems.selectedMaterial(player).isEmpty() ? NO_MATERIAL : AIM_HINT;
             player.sendActionBar(Component.text(form.label() + " · " + hint));
             GestureSession preview = new GestureSession();
             preview.form = form;
-            syncGhosts(player, LivePlan.derive(player, preview, config, wandItems));
+            Optional<Plan> plan = LivePlan.derive(player, preview, config, wandItems);
+            syncGhosts(player, plan, affordable(player, plan, creative));
             return;
         }
 
@@ -94,13 +99,25 @@ public final class GhostService {
             clearFor(player);
             return;
         }
-        syncGhosts(player, plan);
-        player.sendActionBar(Component.text(actionBar(player, session, plan.get())));
+        int have = affordable(player, plan, creative);
+        syncGhosts(player, plan, have);
+        player.sendActionBar(actionBar(session, plan.get(), have, creative));
+    }
+
+    /** Cells the player can afford of this plan's material: MAX in creative, 0 for no plan. */
+    private int affordable(Player player, Optional<Plan> plan, boolean creative) {
+        if (plan.isEmpty()) {
+            return 0;
+        }
+        if (creative) {
+            return Integer.MAX_VALUE;
+        }
+        return Feedstock.count(player.getInventory(), plan.get().material(), wandItems);
     }
 
     // ---------------------------------------------------------------- ghost diff (design §8.3)
 
-    private void syncGhosts(Player player, Optional<Plan> planOpt) {
+    private void syncGhosts(Player player, Optional<Plan> planOpt, int have) {
         if (planOpt.isEmpty()) {
             clearFor(player);
             return;
@@ -110,6 +127,7 @@ public final class GhostService {
         Map<BlockVector, BlockDisplay> current = ghosts.computeIfAbsent(player.getUniqueId(), k -> new HashMap<>());
         Set<BlockVector> desired = new HashSet<>();
 
+        int printableIndex = 0; // printable cells in emission order — the first `have` are affordable
         for (Location loc : plan.cells()) {
             if (!loc.getBlock().isReplaceable()) {
                 continue; // occupied cell is kept at commit — show no ghost (owner feedback)
@@ -118,11 +136,18 @@ public final class GhostService {
             if (!desired.add(key)) {
                 continue;
             }
+            Color glow = printableIndex < have ? config.ghostGlow : UNAFFORDABLE;
+            printableIndex++;
             BlockDisplay existing = current.get(key);
             if (existing == null || !existing.isValid()) {
-                current.put(key, spawn(player, loc, data));
-            } else if (!existing.getBlock().getAsString().equals(data.getAsString())) {
-                existing.setBlock(data); // material or rotation changed
+                current.put(key, spawn(player, loc, data, glow));
+            } else {
+                if (!existing.getBlock().getAsString().equals(data.getAsString())) {
+                    existing.setBlock(data); // material or rotation changed
+                }
+                if (!glow.equals(existing.getGlowColorOverride())) {
+                    existing.setGlowColorOverride(glow); // affordability changed
+                }
             }
         }
         current.entrySet().removeIf(entry -> {
@@ -134,7 +159,7 @@ public final class GhostService {
         });
     }
 
-    private BlockDisplay spawn(Player player, Location cell, BlockData data) {
+    private BlockDisplay spawn(Player player, Location cell, BlockData data, Color glow) {
         World world = cell.getWorld();
         Location origin = new Location(world, cell.getBlockX(), cell.getBlockY(), cell.getBlockZ());
         float s = config.ghostScale;
@@ -145,7 +170,7 @@ public final class GhostService {
                     new Vector3f(t, t, t), new Quaternionf(),
                     new Vector3f(s, s, s), new Quaternionf()));
             entity.setGlowing(true);
-            entity.setGlowColorOverride(config.ghostGlow);
+            entity.setGlowColorOverride(glow);
             entity.setBrightness(new Display.Brightness(15, 15));
             entity.setTeleportDuration(2);
             entity.setPersistent(false);
@@ -171,7 +196,7 @@ public final class GhostService {
 
     // ---------------------------------------------------------------- action bar (design §8.4)
 
-    private String actionBar(Player player, GestureSession session, Plan plan) {
+    private Component actionBar(GestureSession session, Plan plan, int have, boolean creative) {
         Dims dims = plan.dims();
         int cells = plan.cells().size();
         int kept = 0;
@@ -182,14 +207,22 @@ public final class GhostService {
         }
         int printable = cells - kept;
         String material = WandItems.materialDisplayName(plan.material());
-        String have = player.getGameMode() == GameMode.CREATIVE
-                ? "(creative)"
-                : "(have " + Feedstock.count(player.getInventory(), plan.material(), wandItems) + ")";
-        return session.form.label()
-                + " " + dims.primary() + "×" + dims.secondary() + "×" + dims.tertiary()
-                + " · " + cells + " cells, " + kept + " kept"
-                + " · " + material + " ×" + printable + " " + have
-                + " · " + hint(session);
+
+        Component cost;
+        if (creative) {
+            cost = Component.text(material + " ×" + printable + " (creative)");
+        } else if (have >= printable) {
+            cost = Component.text(material + " ×" + printable + " (have " + have + ")");
+        } else {
+            // Short: name the shortfall and paint it red to match the red ghost cells.
+            cost = Component.text(material + " ×" + printable + " (have " + have + ", short " + (printable - have) + ")",
+                    NamedTextColor.RED);
+        }
+        return Component.text(session.form.label()
+                        + " " + dims.primary() + "×" + dims.secondary() + "×" + dims.tertiary()
+                        + " · " + cells + " cells, " + kept + " kept · ")
+                .append(cost)
+                .append(Component.text(" · " + hint(session)));
     }
 
     private static String hint(GestureSession session) {

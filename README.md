@@ -44,6 +44,10 @@ shape. A living body inside the print is lifted on top. Creative mode prints fre
 no undo — mine printed blocks to reclaim them (vanilla drops). Mid-print interruptions (a
 block appears, permission is lost, you log out) stop the wave and refund the unspent items.
 
+If you don't have enough of the material, the cells you can't afford glow **red** in the
+preview and the action bar names the shortfall (`… ×98 (have 60, short 38)`). Printing then
+builds as many cells as you can afford — in placement order — and leaves the rest.
+
 ## Commands
 
 - `/wand give [player]` — give a wand (self if no player). Requires `builderswand.give`.
