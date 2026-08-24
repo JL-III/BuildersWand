@@ -56,36 +56,37 @@ public final class WaveRunner {
 
     // ---------------------------------------------------------------- commit (design §9)
 
-    public void commit(Player player, Plan plan) {
+    /** Runs the §9 pipeline; returns true iff a wave started (so the gesture may clear). */
+    public boolean commit(Player player, Plan plan) {
         UUID id = player.getUniqueId();
 
         // 1. Busy
         Wave existing = waves.get(id);
         if (existing != null) {
             player.sendMessage(red("A print is already running (" + existing.completed + "/" + existing.total() + ")."));
-            return;
+            return false;
         }
 
         // 2. Material (offhand is an allowed material)
         ItemStack offhand = player.getInventory().getItemInOffHand();
         if (offhand.getType().isAir() || wandItems.isWand(offhand)) {
             player.sendMessage(red("Hold a placeable block in your off hand to choose the material."));
-            return;
+            return false;
         }
         Material material = offhand.getType();
         if (WandItems.isDenylisted(material)) {
             player.sendMessage(red(WandItems.materialDisplayName(material) + " can't be printed (multi-block or content-carrying)."));
-            return;
+            return false;
         }
         if (!WandItems.isAllowedMaterial(material)) {
             player.sendMessage(red("Hold a placeable block in your off hand to choose the material."));
-            return;
+            return false;
         }
 
         // 3. Dims legal (defense in depth — the gesture already guarantees it)
         if (Dims.validated(plan.form(), plan.dims().primary(), plan.dims().secondary(), plan.dims().tertiary()) instanceof Err) {
             plugin.getLogger().severe("Commit received illegal dims " + plan.dims() + " for " + plan.form());
-            return;
+            return false;
         }
 
         // 4. Cells (already expanded in emission order by LivePlan)
@@ -96,7 +97,7 @@ public final class WaveRunner {
             Optional<String> denier = protection.deniedBy(player, loc);
             if (denier.isPresent()) {
                 player.sendMessage(red("Blocked by " + denier.get() + " at " + coords(loc) + ". Nothing changed or spent."));
-                return;
+                return false;
             }
         }
 
@@ -114,7 +115,7 @@ public final class WaveRunner {
         // 7. All kept
         if (printable.isEmpty()) {
             player.sendMessage(red("Every cell is already built. Nothing to print."));
-            return;
+            return false;
         }
 
         // 8. Single form only: a body in the way refuses (multi-cell waves push instead)
@@ -122,7 +123,7 @@ public final class WaveRunner {
             for (Location loc : printable) {
                 if (bodyIntersects(plan.world(), loc)) {
                     player.sendMessage(red("A body is in the way at " + coords(loc) + "."));
-                    return;
+                    return false;
                 }
             }
         }
@@ -135,7 +136,7 @@ public final class WaveRunner {
             int have = Feedstock.count(player.getInventory(), material, wandItems);
             if (have < need) {
                 player.sendMessage(red("Need " + need + " " + WandItems.materialDisplayName(material) + "; have " + have + ". Nothing changed or spent."));
-                return;
+                return false;
             }
             Feedstock.reserve(player.getInventory(), material, need, wandItems);
             reserved = need;
@@ -156,6 +157,7 @@ public final class WaveRunner {
         ensureTask();
 
         player.sendMessage(Component.text("Printing " + plan.form().key() + ": " + need + " cells (" + kept + " kept).", NamedTextColor.GREEN));
+        return true;
     }
 
     // ---------------------------------------------------------------- tick (design §10.3)
