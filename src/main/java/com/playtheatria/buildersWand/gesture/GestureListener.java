@@ -157,8 +157,19 @@ public final class GestureListener implements Listener {
                 block.getX() + face.getModX(),
                 block.getY() + face.getModY(),
                 block.getZ() + face.getModZ());
-        session.orientation = Orientation.fromClick(face, player.getLocation().getYaw());
+        session.orientation = orientationFor(form, face, player.getLocation().getYaw());
         sessions.put(player.getUniqueId(), session);
+    }
+
+    private static Orientation orientationFor(Form form, BlockFace clickedFace, float yaw) {
+        // A box always builds as a horizontal footprint + vertical height, so its stage order is
+        // the same everywhere — x or z, then the other, then y. On a wall that means using a
+        // floor-style (up) basis instead of the wall's up-is-an-in-plane-axis basis; floor and
+        // ceiling clicks already do this.
+        if (form == Form.BOX && clickedFace != BlockFace.UP && clickedFace != BlockFace.DOWN) {
+            return Orientation.fromClick(BlockFace.UP, yaw);
+        }
+        return Orientation.fromClick(clickedFace, yaw);
     }
 
     @EventHandler
