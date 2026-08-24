@@ -1,9 +1,16 @@
 name: BuildersWand
-version: 'v0.0.1-alpha.1'
-main: com.playtheatria.buildersWand.BuildersWand
-api-version: '1.21'
+version: '${version}'
+main: com.playtheatria.buildersWand.BuildersWandPlugin
+api-version: '26.1'
+softdepend: [WorldGuard, Lands]
 commands:
   wand:
-    description: Gives the player a Builders Wand
-    usage: /wand [<args>]
-    aliases: [wand]
+    description: The Builders Wand materializer
+    usage: /wand [give|form] [args]
+permissions:
+  builderswand.use:
+    description: Use the Builders Wand and /wand form
+    default: true
+  builderswand.give:
+    description: Give a Builders Wand
+    default: op

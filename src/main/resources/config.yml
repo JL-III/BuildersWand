@@ -1,0 +1,9 @@
+cadence:
+  small-print-max-cells: 16     # ≤ this many printable cells → slow cadence
+  small-print-ticks-per-cell: 2
+  large-print-ticks-per-cell: 1
+ghost:
+  update-ticks: 2
+  scale: 0.8
+  glow-rgb: "9E3DFF"
+anchor-reach: 16
