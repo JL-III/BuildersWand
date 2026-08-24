@@ -95,10 +95,12 @@ public final class WandItems {
      * content-carrying (design §5.2).
      */
     public static boolean isAllowedMaterial(Material type) {
-        return type.isBlock() && type.isItem() && type.isSolid()
-                && !Tag.DOORS.isTagged(type)
-                && !Tag.BEDS.isTagged(type)
-                && !Tag.SHULKER_BOXES.isTagged(type);
+        return type.isBlock() && type.isItem() && type.isSolid() && !isDenylisted(type);
+    }
+
+    /** Multi-block or content-carrying materials excluded from printing (design §5.2). */
+    public static boolean isDenylisted(Material type) {
+        return Tag.DOORS.isTagged(type) || Tag.BEDS.isTagged(type) || Tag.SHULKER_BOXES.isTagged(type);
     }
 
     /** Player-facing material name (design §13): {@code SMOOTH_STONE} → {@code smooth stone}. */
