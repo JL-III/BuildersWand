@@ -4,6 +4,7 @@ import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.data.BlockData;
 
 import java.util.List;
 import java.util.Set;
@@ -20,6 +21,7 @@ public final class Wave {
     public final UUID owner;
     public final World world;
     public final Material material;
+    public final BlockData blockData;
     public final List<Location> printable;
     public final int ticksPerCell;
     public final Set<Chunk> tickets;
@@ -29,11 +31,12 @@ public final class Wave {
     public int reserved;
     public int ticksUntilNext;
 
-    public Wave(UUID owner, World world, Material material, List<Location> printable,
+    public Wave(UUID owner, World world, Material material, BlockData blockData, List<Location> printable,
                 int ticksPerCell, Set<Chunk> tickets, boolean creative, int reserved) {
         this.owner = owner;
         this.world = world;
         this.material = material;
+        this.blockData = blockData;
         this.printable = printable;
         this.ticksPerCell = ticksPerCell;
         this.tickets = tickets;

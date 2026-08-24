@@ -14,7 +14,6 @@ import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.BlockDisplay;
@@ -107,8 +106,7 @@ public final class GhostService {
             return;
         }
         Plan plan = planOpt.get();
-        Material material = plan.material();
-        BlockData data = material.createBlockData();
+        BlockData data = plan.blockData();
         Map<BlockVector, BlockDisplay> current = ghosts.computeIfAbsent(player.getUniqueId(), k -> new HashMap<>());
         Set<BlockVector> desired = new HashSet<>();
 
@@ -123,8 +121,8 @@ public final class GhostService {
             BlockDisplay existing = current.get(key);
             if (existing == null || !existing.isValid()) {
                 current.put(key, spawn(player, loc, data));
-            } else if (existing.getBlock().getMaterial() != material) {
-                existing.setBlock(data);
+            } else if (!existing.getBlock().getAsString().equals(data.getAsString())) {
+                existing.setBlock(data); // material or rotation changed
             }
         }
         current.entrySet().removeIf(entry -> {

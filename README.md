@@ -22,7 +22,8 @@ the 512-cap are fixed invariants, not config.
 
 ## Using the wand
 
-1. `/wand give` to get a wand, then `/wand form <name>` to choose a form (tab-completed).
+1. `/wand give` to get a wand, then `/wand form <name>` to choose a form (or **shift +
+   right-click** to cycle forms). The current form shows in the wand's name.
 2. Hold a **placeable solid block in your off hand** — that block is the print material
    (doors, beds, and shulker boxes are not allowed). Cost is one item per placed cell.
 3. **Right-click a surface** to anchor. A purple, glowing, shrunken-block ghost tracks your
@@ -31,7 +32,10 @@ the 512-cap are fixed invariants, not config.
    ground, an existing wall) are shown as `kept` in the action bar, not ghosted.
 4. **Right-click** to lock each stage (length / width / height, or radius), then a final
    right-click **prints**.
-5. **Left-click cancels.** The gesture also drops if you switch hotbar slots away from the
+5. **Shift + left-click** rotates how oriented blocks (stairs, logs, …) are placed — it cycles
+   the four facings and the upside-down half, starting from the block's own default
+   orientation. The ghost previews the real oriented block.
+6. **Left-click cancels.** The gesture also drops if you switch hotbar slots away from the
    wand, change the wand's form, die, or change worlds.
 
 Blocks appear one per tick (one per two ticks for small prints ≤ 16 cells) with place sounds.

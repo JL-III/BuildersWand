@@ -143,7 +143,7 @@ public final class WaveRunner {
         int ticksPerCell = need <= config.smallPrintMaxCells
                 ? config.smallPrintTicksPerCell
                 : config.largePrintTicksPerCell;
-        waves.put(id, new Wave(id, plan.world(), material, printable, ticksPerCell, tickets, creative, reserved));
+        waves.put(id, new Wave(id, plan.world(), material, plan.blockData(), printable, ticksPerCell, tickets, creative, reserved));
         ensureTask();
 
         player.sendMessage(Component.text("Printing " + plan.form().key() + ": " + need + " cells (" + kept + " kept).", NamedTextColor.GREEN));
@@ -212,8 +212,8 @@ public final class WaveRunner {
             stop(wave, player, StopReason.BODY_STUCK, loc);
             return;
         }
-        // 4. Place with physics, then play the placed block's sound
-        block.setBlockData(wave.material.createBlockData(), true);
+        // 4. Place the oriented state with physics, then play the placed block's sound
+        block.setBlockData(wave.blockData, true);
         wave.world.playSound(loc, block.getBlockSoundGroup().getPlaceSound(), 1.0f, 1.0f);
         // 5. Account
         wave.completed++;

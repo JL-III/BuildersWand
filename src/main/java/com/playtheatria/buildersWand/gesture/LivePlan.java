@@ -6,6 +6,7 @@ import com.playtheatria.buildersWand.form.Expansion;
 import com.playtheatria.buildersWand.form.Form;
 import com.playtheatria.buildersWand.form.Measurement;
 import com.playtheatria.buildersWand.form.Orientation;
+import com.playtheatria.buildersWand.wand.BlockOrientation;
 import com.playtheatria.buildersWand.wand.WandItems;
 import com.playtheatria.buildersWand.wave.Plan;
 import org.bukkit.Bukkit;
@@ -15,6 +16,7 @@ import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
 import org.bukkit.util.BlockVector;
 import org.bukkit.util.RayTraceResult;
@@ -58,6 +60,9 @@ public final class LivePlan {
         if (material.isEmpty()) {
             return Optional.empty();
         }
+        int rotation = wandItems.getRotation(player.getInventory().getItemInMainHand());
+        BlockData blockData = BlockOrientation.oriented(material.get(), rotation);
+
         if (session.anchor == null) {
             Optional<BlockVector> anchor = wouldBeAnchor(player, config); // un-anchored ghost = one cell
             if (anchor.isEmpty()) {
@@ -66,7 +71,7 @@ public final class LivePlan {
             World world = player.getWorld();
             BlockVector a = anchor.get();
             Location cell = new Location(world, a.getBlockX(), a.getBlockY(), a.getBlockZ());
-            return Optional.of(new Plan(world, session.form, new Dims(1, 1, 1), a, List.of(cell), material.get()));
+            return Optional.of(new Plan(world, session.form, new Dims(1, 1, 1), a, List.of(cell), material.get(), blockData));
         }
 
         World world = Bukkit.getWorld(session.worldId);
@@ -83,7 +88,7 @@ public final class LivePlan {
                     base.getBlockY() + off.getBlockY(),
                     base.getBlockZ() + off.getBlockZ()));
         }
-        return Optional.of(new Plan(world, session.form, reading.dims(), base, cells, material.get()));
+        return Optional.of(new Plan(world, session.form, reading.dims(), base, cells, material.get(), blockData));
     }
 
     /** Freeze the current stage into the session on a lock click (design §7.3). */

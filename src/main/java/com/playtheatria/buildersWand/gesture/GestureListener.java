@@ -90,7 +90,10 @@ public final class GestureListener implements Listener {
         }
         Action action = event.getAction();
         if (action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK) {
-            if (sessions.containsKey(player.getUniqueId())) {
+            if (player.isSneaking()) {
+                event.setCancelled(true);
+                wandItems.cycleRotation(item); // rotate placement; keep the live gesture
+            } else if (sessions.containsKey(player.getUniqueId())) {
                 event.setCancelled(true);
                 clearSession(player);
             }

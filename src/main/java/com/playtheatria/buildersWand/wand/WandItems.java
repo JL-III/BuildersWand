@@ -26,13 +26,16 @@ public final class WandItems {
 
     public static final String KEY_WAND = "wand";
     public static final String KEY_FORM = "form";
+    public static final String KEY_ROTATION = "rotation";
 
     private final NamespacedKey wandKey;
     private final NamespacedKey formKey;
+    private final NamespacedKey rotationKey;
 
     public WandItems(Plugin plugin) {
         this.wandKey = new NamespacedKey(plugin, KEY_WAND);
         this.formKey = new NamespacedKey(plugin, KEY_FORM);
+        this.rotationKey = new NamespacedKey(plugin, KEY_ROTATION);
     }
 
     public ItemStack createWand(Form form) {
@@ -86,6 +89,28 @@ public final class WandItems {
         item.editMeta(meta -> {
             meta.getPersistentDataContainer().set(formKey, PersistentDataType.STRING, form.key());
             applyName(meta, form);
+        });
+    }
+
+    /** Placement rotation step (design: oriented placement, owner feature). Defaults to 0. */
+    public int getRotation(ItemStack item) {
+        if (item == null) {
+            return 0;
+        }
+        ItemMeta meta = item.getItemMeta();
+        if (meta == null) {
+            return 0;
+        }
+        Integer rotation = meta.getPersistentDataContainer().get(rotationKey, PersistentDataType.INTEGER);
+        return rotation == null ? 0 : rotation;
+    }
+
+    /** Advance the placement rotation by one step (wraps at {@link BlockOrientation#STATES}). */
+    public void cycleRotation(ItemStack item) {
+        item.editMeta(meta -> {
+            Integer current = meta.getPersistentDataContainer().get(rotationKey, PersistentDataType.INTEGER);
+            int next = (((current == null ? 0 : current) + 1) % BlockOrientation.STATES);
+            meta.getPersistentDataContainer().set(rotationKey, PersistentDataType.INTEGER, next);
         });
     }
 
