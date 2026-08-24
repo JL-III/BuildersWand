@@ -10,7 +10,7 @@ commands:
 permissions:
   builderswand.use:
     description: Use the Builders Wand and /wand form
-    default: true
+    default: op
   builderswand.give:
     description: Give a Builders Wand
     default: op

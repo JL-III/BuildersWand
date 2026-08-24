@@ -7,6 +7,7 @@ public enum StopReason {
     BLOCK_IN_WAY("a block appeared in the way at %d, %d, %d", true),
     PERMISSION_LOST("build permission was lost at %d, %d, %d", true),
     BODY_STUCK("a body could not be moved clear", false),
+    OUT_OF_MATERIAL("you ran out of materials", false),
     PLAYER_QUIT("you left the game", false),
     SERVER_STOPPING("the server is stopping", false);
 

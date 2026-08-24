@@ -41,8 +41,14 @@ the 512-cap are fixed invariants, not config.
 Blocks appear one per tick (one per two ticks for small prints ≤ 16 cells) with place sounds.
 Cells that are already built are **kept and never charged**; a print completes a partial
 shape. A living body inside the print is lifted on top. Creative mode prints free. There is
-no undo — mine printed blocks to reclaim them (vanilla drops). Mid-print interruptions (a
-block appears, permission is lost, you log out) stop the wave and refund the unspent items.
+no undo — mine printed blocks to reclaim them (vanilla drops). Materials are spent one per
+placed block as the wave runs (never taken up front), so mid-print interruptions (a block
+appears, permission is lost, you run out of materials, you log out) just stop the wave and
+your unspent blocks are simply still in your inventory.
+
+If you don't have enough of the material, the cells you can't afford glow **red** in the
+preview and the action bar names the shortfall (`… ×98 (have 60, short 38)`). Printing then
+builds as many cells as you can afford — in placement order — and leaves the rest.
 
 ## Commands
 
@@ -53,7 +59,8 @@ block appears, permission is lost, you log out) stop the wave and refund the uns
 
 ## Permissions
 
-- `builderswand.use` — use the wand and `/wand form`. Default **true**.
+- `builderswand.use` — use the wand and `/wand form`. Default **op** (ops have it; grant it
+  to give other players access).
 - `builderswand.give` — `/wand give`. Default **op**.
 
 ## Configuration (`config.yml`)

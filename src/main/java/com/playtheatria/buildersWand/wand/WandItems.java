@@ -28,6 +28,11 @@ public final class WandItems {
     public static final String KEY_FORM = "form";
     public static final String KEY_ROTATION = "rotation";
 
+    /** Permission to use the wand (gesture + ghost) and {@code /wand form}. Default op. */
+    public static final String PERMISSION_USE = "builderswand.use";
+    /** Permission for {@code /wand give}. Default op. */
+    public static final String PERMISSION_GIVE = "builderswand.give";
+
     private final NamespacedKey wandKey;
     private final NamespacedKey formKey;
     private final NamespacedKey rotationKey;

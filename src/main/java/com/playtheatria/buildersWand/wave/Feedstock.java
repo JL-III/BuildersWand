@@ -2,18 +2,15 @@ package com.playtheatria.buildersWand.wave;
 
 import com.playtheatria.buildersWand.wand.WandItems;
 import org.bukkit.Material;
-import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Inventory feedstock accounting (design §11). Matching is by {@link Material} only, ignoring
  * item meta, and skipping any stack carrying this plugin's wand PDC (design §5.2) — hence the
- * {@link WandItems} collaborator the spec's skip clause requires.
+ * {@link WandItems} collaborator the spec's skip clause requires. Feedstock is spent one item
+ * per placed cell as the wave runs (never reserved up front), so unspent items simply stay in
+ * the inventory and there is nothing to refund on a stop.
  */
 public final class Feedstock {
 
@@ -35,59 +32,36 @@ public final class Feedstock {
         return total;
     }
 
-    /** Remove exactly {@code n} items of {@code material}: storage slots 0..35 first, offhand last. */
-    public static void reserve(PlayerInventory inventory, Material material, int n, WandItems wandItems) {
-        int remaining = n;
+    /**
+     * Remove one {@code material} — storage slots 0..35 first, offhand last — returning true if
+     * one was found and removed. Called immediately before each placement (remove-then-place),
+     * so a block is never placed for free.
+     */
+    public static boolean spendOne(PlayerInventory inventory, Material material, WandItems wandItems) {
         ItemStack[] storage = inventory.getStorageContents();
-        for (int i = 0; i < storage.length && remaining > 0; i++) {
+        for (int i = 0; i < storage.length; i++) {
             ItemStack stack = storage[i];
-            if (!matches(stack, material, wandItems)) {
-                continue;
-            }
-            int amount = stack.getAmount();
-            int take = Math.min(remaining, amount);
-            if (take >= amount) {
-                storage[i] = null;
-            } else {
-                stack.setAmount(amount - take);
-            }
-            remaining -= take;
-        }
-        inventory.setStorageContents(storage);
-
-        if (remaining > 0) {
-            ItemStack offhand = inventory.getItemInOffHand();
-            if (matches(offhand, material, wandItems)) {
-                int amount = offhand.getAmount();
-                int take = Math.min(remaining, amount);
-                if (take >= amount) {
-                    inventory.setItemInOffHand(null);
+            if (matches(stack, material, wandItems)) {
+                if (stack.getAmount() <= 1) {
+                    storage[i] = null;
                 } else {
-                    offhand.setAmount(amount - take);
-                    inventory.setItemInOffHand(offhand);
+                    stack.setAmount(stack.getAmount() - 1);
                 }
-                remaining -= take;
+                inventory.setStorageContents(storage);
+                return true;
             }
         }
-    }
-
-    /** Return {@code n} items to the player, dropping any that do not fit (design §10.3). */
-    public static void refund(Player player, Material material, int n) {
-        if (n <= 0) {
-            return;
+        ItemStack offhand = inventory.getItemInOffHand();
+        if (matches(offhand, material, wandItems)) {
+            if (offhand.getAmount() <= 1) {
+                inventory.setItemInOffHand(null);
+            } else {
+                offhand.setAmount(offhand.getAmount() - 1);
+                inventory.setItemInOffHand(offhand);
+            }
+            return true;
         }
-        int remaining = n;
-        int maxStack = material.getMaxStackSize();
-        List<ItemStack> stacks = new ArrayList<>();
-        while (remaining > 0) {
-            int chunk = Math.min(remaining, maxStack);
-            stacks.add(new ItemStack(material, chunk));
-            remaining -= chunk;
-        }
-        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(stacks.toArray(new ItemStack[0]));
-        for (ItemStack leftover : leftovers.values()) {
-            player.getWorld().dropItemNaturally(player.getLocation(), leftover);
-        }
+        return false;
     }
 
     private static boolean matches(ItemStack stack, Material material, WandItems wandItems) {
