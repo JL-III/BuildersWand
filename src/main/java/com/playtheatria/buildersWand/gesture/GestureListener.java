@@ -109,13 +109,7 @@ public final class GestureListener implements Listener {
             return;
         }
         if (session.stage() < session.form.lockStages()) {
-            LivePlan.lockValue(player, session, config).ifPresent(value -> {
-                if (session.lock1 == null) {
-                    session.lock1 = value;
-                } else {
-                    session.lock2 = value;
-                }
-            });
+            LivePlan.applyLock(player, session, config);
             return;
         }
         Optional<Plan> plan = LivePlan.derive(player, session, config, wandItems);

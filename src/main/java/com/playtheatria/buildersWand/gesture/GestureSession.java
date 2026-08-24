@@ -19,6 +19,8 @@ public final class GestureSession {
     public Orientation orientation;
     public Integer lock1;
     public Integer lock2;
+    /** Box only: whether the first-locked in-plane axis was lateral (L) rather than away (S/V). */
+    public boolean firstAxisLateral;
 
     public int stage() {
         if (lock1 == null) {

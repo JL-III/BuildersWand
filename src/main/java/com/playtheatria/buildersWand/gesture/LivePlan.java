@@ -88,10 +88,10 @@ public final class LivePlan {
         return Optional.of(new Plan(world, session.form, reading.dims(), base, cells, material.get()));
     }
 
-    /** The signed extent/step to freeze for the current stage on a lock click (design §7.3). */
-    public static Optional<Integer> lockValue(Player player, GestureSession session, PluginConfig config) {
+    /** Freeze the current stage into the session on a lock click (design §7.3). */
+    public static void applyLock(Player player, GestureSession session, PluginConfig config) {
         if (session.anchor == null) {
-            return Optional.empty();
+            return;
         }
         Aim aim = Aim.of(player, config);
         Orientation o = session.orientation;
@@ -99,15 +99,21 @@ public final class LivePlan {
         Vector inPlane = aim.point(center(anchor), vec(o.n()));
         int offL = cellOffset(inPlane, anchor, o.l());
         int offSV = cellOffset(inPlane, anchor, o.s());
-        int stage = session.stage();
-        return Optional.of(switch (session.form) {
-            case CYLINDER -> Measurement.radiusStep(offL, offSV, 9);
-            case SPHERE -> Measurement.radiusStep(offL, offSV, 7);
-            case DIAGONAL -> clampExtent(offL, 5);
-            case BOX -> o.wall()
-                    ? (stage == 0 ? clampExtent(offL, 8) : clampExtent(offSV, 8))
-                    : (stage == 0 ? clampExtent(offSV, 8) : clampExtent(offL, 8));
-        });
+        switch (session.form) {
+            case CYLINDER -> session.lock1 = Measurement.radiusStep(offL, offSV, 9);
+            case SPHERE -> session.lock1 = Measurement.radiusStep(offL, offSV, 7);
+            case DIAGONAL -> session.lock1 = clampExtent(offL, 5);
+            case BOX -> {
+                if (session.stage() == 0) {
+                    // Lock the drawn line's axis (dominant drag) and its length.
+                    session.firstAxisLateral = Math.abs(offL) >= Math.abs(offSV);
+                    session.lock1 = session.firstAxisLateral ? clampExtent(offL, 8) : clampExtent(offSV, 8);
+                } else {
+                    // Lock the other in-plane axis (the rectangle's width).
+                    session.lock2 = session.firstAxisLateral ? clampExtent(offSV, 8) : clampExtent(offL, 8);
+                }
+            }
+        }
     }
 
     // ------------------------------------------------------------------ reading (design §7.3–§7.6)
@@ -129,22 +135,31 @@ public final class LivePlan {
     }
 
     private static Reading readBox(Aim aim, GestureSession s, Orientation o, BlockVector anchor, int offL, int offSV) {
-        // Both in-plane extents live-track the aim until locked (design §7.3): the footprint
-        // is a full rectangle from the first stage, not a one-wide line.
+        int stage = s.stage();
         int lExtent;
         int svExtent;
-        if (o.wall()) {
-            lExtent = s.lock1 != null ? s.lock1 : clampExtent(offL, 8);
-            svExtent = s.lock2 != null ? s.lock2 : clampExtent(offSV, 8);
+        if (stage == 0) {
+            // A one-wide line from the anchor along whichever in-plane axis is dragged more
+            // (right/left = L, forward/back or up/down = S/V) — "first click is x or z".
+            if (Math.abs(offL) >= Math.abs(offSV)) {
+                lExtent = clampExtent(offL, 8);
+                svExtent = 1;
+            } else {
+                lExtent = 1;
+                svExtent = clampExtent(offSV, 8);
+            }
         } else {
-            svExtent = s.lock1 != null ? s.lock1 : clampExtent(offSV, 8);
-            lExtent = s.lock2 != null ? s.lock2 : clampExtent(offL, 8);
+            // The first lock froze one in-plane axis; the other now widens the line to a rectangle.
+            Integer lLock = s.firstAxisLateral ? s.lock1 : s.lock2;
+            Integer svLock = s.firstAxisLateral ? s.lock2 : s.lock1;
+            lExtent = lLock != null ? lLock : clampExtent(offL, 8);
+            svExtent = svLock != null ? svLock : clampExtent(offSV, 8);
         }
         BlockVector inPlaneAnchor = shift(anchor, o.l(), Measurement.negativeAnchorShift(lExtent));
         inPlaneAnchor = shift(inPlaneAnchor, o.s(), Measurement.negativeAnchorShift(svExtent));
 
         int nExtent = 1;
-        if (s.lock1 != null && s.lock2 != null) {
+        if (stage >= 2) { // both in-plane axes locked → height tracks along N
             Vector nTarget = aim.point(center(inPlaneAnchor), vec(o.s()));
             nExtent = clampExtent(cellOffset(nTarget, inPlaneAnchor, o.n()), 8);
         }
