@@ -12,6 +12,7 @@ import com.playtheatria.buildersWand.wave.Plan;
 import com.playtheatria.buildersWand.wave.WaveRunner;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.format.TextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.GameMode;
@@ -47,12 +48,19 @@ public final class GhostService {
     private static final String AIM_HINT = "Aim at a surface; RIGHT-CLICK anchors there.";
     private static final Color UNAFFORDABLE = Color.fromRGB(0xFF, 0x2D, 0x2D); // cells you can't afford
 
+    // The idle "how to use" hint breathes over PULSE_PERIOD ticks, is drawn for PULSE_SHOW of
+    // them, then stays silent for the rest so other plugins' action-bar messages can show.
+    private static final int PULSE_PERIOD = 40;
+    private static final int PULSE_SHOW = 22;
+    private static final TextColor HINT_COLOR = TextColor.color(0x55, 0xFF, 0xFF); // aqua
+
     private final JavaPlugin plugin;
     private final PluginConfig config;
     private final WandItems wandItems;
     private final WaveRunner waveRunner;
     private final GestureListener gestureListener;
     private final Map<UUID, Map<BlockVector, BlockDisplay>> ghosts = new HashMap<>();
+    private int pulseTick;
 
     public GhostService(JavaPlugin plugin, PluginConfig config, WandItems wandItems,
                         WaveRunner waveRunner, GestureListener gestureListener) {
@@ -68,6 +76,7 @@ public final class GhostService {
     }
 
     private void tick() {
+        pulseTick++;
         for (Player player : Bukkit.getOnlinePlayers()) {
             update(player);
         }
@@ -84,9 +93,10 @@ public final class GhostService {
         GestureSession session = gestureListener.sessionOf(player);
         boolean creative = player.getGameMode() == GameMode.CREATIVE;
         if (session == null) {
-            // Un-anchored: form + hint on the action bar, ghost the would-be anchor cell.
+            // Un-anchored: breathe the "how to use" hint (and leave silent gaps for other
+            // plugins' action-bar messages); ghost the would-be anchor cell every tick.
             String hint = wandItems.selectedMaterial(player).isEmpty() ? NO_MATERIAL : AIM_HINT;
-            player.sendActionBar(Component.text(form.label() + " · " + hint));
+            sendPulsedHint(player, form.label() + " · " + hint);
             GestureSession preview = new GestureSession();
             preview.form = form;
             Optional<Plan> plan = LivePlan.derive(player, preview, config, wandItems);
@@ -114,6 +124,23 @@ public final class GhostService {
             return Integer.MAX_VALUE;
         }
         return Feedstock.count(player.getInventory(), plan.get().material(), wandItems);
+    }
+
+    /**
+     * Send the idle hint with a breathing fade during the show window, and nothing during the
+     * silent gap — so the hint pulses and other action-bar messages get a chance to appear.
+     */
+    private void sendPulsedHint(Player player, String text) {
+        int phase = pulseTick % PULSE_PERIOD;
+        if (phase >= PULSE_SHOW) {
+            return; // silent gap
+        }
+        float brightness = (float) Math.sin(Math.PI * phase / PULSE_SHOW); // 0 → 1 → 0
+        TextColor color = TextColor.color(
+                (int) (HINT_COLOR.red() * brightness),
+                (int) (HINT_COLOR.green() * brightness),
+                (int) (HINT_COLOR.blue() * brightness));
+        player.sendActionBar(Component.text(text, color));
     }
 
     // ---------------------------------------------------------------- ghost diff (design §8.3)
@@ -211,19 +238,20 @@ public final class GhostService {
 
         Component cost;
         if (creative) {
-            cost = Component.text(material + " ×" + printable + " (creative)");
+            cost = Component.text(material + " ×" + printable + " (creative)", NamedTextColor.GRAY);
         } else if (have >= printable) {
-            cost = Component.text(material + " ×" + printable + " (have " + have + ")");
+            cost = Component.text(material + " ×" + printable + " (have " + have + ")", NamedTextColor.GREEN);
         } else {
             // Short: name the shortfall and paint it red to match the red ghost cells.
             cost = Component.text(material + " ×" + printable + " (have " + have + ", short " + (printable - have) + ")",
                     NamedTextColor.RED);
         }
-        return Component.text(session.form.label()
-                        + " " + dims.primary() + "×" + dims.secondary() + "×" + dims.tertiary()
-                        + " · " + cells + " cells, " + kept + " kept · ")
+        return Component.text(session.form.label(), NamedTextColor.GOLD)
+                .append(Component.text(" " + dims.primary() + "×" + dims.secondary() + "×" + dims.tertiary()
+                        + " · " + cells + " cells, " + kept + " kept · ", NamedTextColor.GRAY))
                 .append(cost)
-                .append(Component.text(" · " + hint(session)));
+                .append(Component.text(" · ", NamedTextColor.GRAY))
+                .append(Component.text(hint(session), NamedTextColor.AQUA));
     }
 
     private static String hint(GestureSession session) {
