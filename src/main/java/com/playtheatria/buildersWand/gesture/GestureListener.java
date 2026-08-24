@@ -45,13 +45,17 @@ public final class GestureListener implements Listener {
     private final WandItems wandItems;
     private final PluginConfig config;
     private final WaveRunner waveRunner;
-    private final Consumer<Player> ghostClearer;
+    private Consumer<Player> ghostClearer = player -> { };
     private final Map<UUID, GestureSession> sessions = new HashMap<>();
 
-    public GestureListener(WandItems wandItems, PluginConfig config, WaveRunner waveRunner, Consumer<Player> ghostClearer) {
+    public GestureListener(WandItems wandItems, PluginConfig config, WaveRunner waveRunner) {
         this.wandItems = wandItems;
         this.config = config;
         this.waveRunner = waveRunner;
+    }
+
+    /** Wire ghost removal on gesture drops (set once the ghost service exists). */
+    public void setGhostClearer(Consumer<Player> ghostClearer) {
         this.ghostClearer = ghostClearer;
     }
 

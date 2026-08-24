@@ -2,6 +2,7 @@ package com.playtheatria.buildersWand;
 
 import com.playtheatria.buildersWand.command.WandCommand;
 import com.playtheatria.buildersWand.config.PluginConfig;
+import com.playtheatria.buildersWand.ghost.GhostService;
 import com.playtheatria.buildersWand.gesture.GestureListener;
 import com.playtheatria.buildersWand.protect.ProtectionBridge;
 import com.playtheatria.buildersWand.wand.WandItems;
@@ -17,6 +18,7 @@ public final class BuildersWandPlugin extends JavaPlugin {
     private ProtectionBridge protectionBridge;
     private WaveRunner waveRunner;
     private GestureListener gestureListener;
+    private GhostService ghostService;
 
     @Override
     public void onEnable() {
@@ -24,22 +26,28 @@ public final class BuildersWandPlugin extends JavaPlugin {
         this.wandItems = new WandItems(this);
         this.protectionBridge = ProtectionBridge.composite(this);
         this.waveRunner = new WaveRunner(this, protectionBridge, config, wandItems);
-        // Ghost clearer is a no-op until the ghost service exists (CP6).
-        this.gestureListener = new GestureListener(wandItems, config, waveRunner, player -> { });
-        getServer().getPluginManager().registerEvents(gestureListener, this);
+        this.gestureListener = new GestureListener(wandItems, config, waveRunner);
+        this.ghostService = new GhostService(this, config, wandItems, waveRunner, gestureListener);
+        gestureListener.setGhostClearer(ghostService::clearFor);
 
+        getServer().getPluginManager().registerEvents(gestureListener, this);
         PluginCommand wandCommand = getCommand("wand");
         if (wandCommand != null) {
             WandCommand executor = new WandCommand(wandItems, gestureListener::clearSession);
             wandCommand.setExecutor(executor);
             wandCommand.setTabCompleter(executor);
         }
+
+        ghostService.start();
     }
 
     @Override
     public void onDisable() {
         if (waveRunner != null) {
             waveRunner.stopAll(StopReason.SERVER_STOPPING);
+        }
+        if (ghostService != null) {
+            ghostService.clearAll();
         }
     }
 }

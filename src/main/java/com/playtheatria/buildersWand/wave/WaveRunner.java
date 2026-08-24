@@ -160,6 +160,11 @@ public final class WaveRunner {
         return true;
     }
 
+    /** Whether this player has a wave printing right now (ghosts are suppressed while so). */
+    public boolean hasActiveWave(Player player) {
+        return waves.containsKey(player.getUniqueId());
+    }
+
     // ---------------------------------------------------------------- tick (design §10.3)
 
     private void tick() {
