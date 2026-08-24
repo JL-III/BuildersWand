@@ -26,7 +26,7 @@ import java.util.function.Consumer;
  */
 public final class WandCommand implements CommandExecutor, TabCompleter {
 
-    private static final String USAGE = "Usage: /wand [give|form <single|diagonal|box|cylinder|sphere>]";
+    private static final String USAGE = "Usage: /wand [give|form <diagonal|box|cylinder|sphere>]";
     private static final List<String> FORM_KEYS =
             Arrays.stream(Form.values()).map(Form::key).toList();
 
@@ -68,7 +68,7 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(Component.text("Specify a player: /wand give <player>", NamedTextColor.RED));
             return true;
         }
-        ItemStack wand = wandItems.createWand(Form.SINGLE);
+        ItemStack wand = wandItems.createWand(Form.DEFAULT);
         target.getInventory().addItem(wand).values()
                 .forEach(leftover -> target.getWorld().dropItemNaturally(target.getLocation(), leftover));
         sender.sendMessage(Component.text("Gave a Builders Wand to " + target.getName() + ".", NamedTextColor.GREEN));

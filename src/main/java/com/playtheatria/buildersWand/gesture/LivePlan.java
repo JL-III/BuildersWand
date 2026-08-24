@@ -40,22 +40,6 @@ public final class LivePlan {
     private LivePlan() {
     }
 
-    /** The one-cell Single plan at the aimed anchor, or empty (no block aimed / no material). */
-    public static Optional<Plan> single(Player player, PluginConfig config, WandItems wandItems) {
-        Optional<Material> material = wandItems.selectedMaterial(player);
-        if (material.isEmpty()) {
-            return Optional.empty();
-        }
-        Optional<BlockVector> anchor = wouldBeAnchor(player, config);
-        if (anchor.isEmpty()) {
-            return Optional.empty();
-        }
-        World world = player.getWorld();
-        BlockVector a = anchor.get();
-        Location cell = new Location(world, a.getBlockX(), a.getBlockY(), a.getBlockZ());
-        return Optional.of(new Plan(world, Form.SINGLE, new Dims(1, 1, 1), a, List.of(cell), material.get()));
-    }
-
     /** The cell the first click would anchor (aimed block + face normal), or empty. */
     public static Optional<BlockVector> wouldBeAnchor(Player player, PluginConfig config) {
         RayTraceResult hit = player.rayTraceBlocks(config.anchorReach, FluidCollisionMode.NEVER);
@@ -70,19 +54,13 @@ public final class LivePlan {
                 block.getZ() + face.getModZ()));
     }
 
-    /**
-     * The live plan for the ghost and the print click. Empty when no valid material or, for
-     * an un-anchored Single, always (Single prints via {@link #single} instead).
-     */
+    /** The live plan for the ghost and the print click. Empty when no valid material. */
     public static Optional<Plan> derive(Player player, GestureSession session, PluginConfig config, WandItems wandItems) {
         Optional<Material> material = wandItems.selectedMaterial(player);
         if (material.isEmpty()) {
             return Optional.empty();
         }
         if (session.anchor == null) {
-            if (session.form == Form.SINGLE) {
-                return Optional.empty();
-            }
             Optional<BlockVector> anchor = wouldBeAnchor(player, config); // un-anchored ghost = one cell
             if (anchor.isEmpty()) {
                 return Optional.empty();
@@ -129,7 +107,6 @@ public final class LivePlan {
             case BOX -> o.wall()
                     ? (stage == 0 ? clampExtent(offL, 8) : clampExtent(offSV, 8))
                     : (stage == 0 ? clampExtent(offSV, 8) : clampExtent(offL, 8));
-            case SINGLE -> 1;
         });
     }
 
@@ -144,7 +121,6 @@ public final class LivePlan {
         int offSV = cellOffset(inPlane, anchor, o.s());
 
         return switch (session.form) {
-            case SINGLE -> new Reading(new Dims(1, 1, 1), anchor);
             case BOX -> readBox(aim, session, o, anchor, offL, offSV);
             case CYLINDER -> readCylinder(aim, session, o, anchor, offL, offSV);
             case SPHERE -> readSphere(aim, session, o, anchor, offL, offSV);
@@ -153,14 +129,16 @@ public final class LivePlan {
     }
 
     private static Reading readBox(Aim aim, GestureSession s, Orientation o, BlockVector anchor, int offL, int offSV) {
+        // Both in-plane extents live-track the aim until locked (design §7.3): the footprint
+        // is a full rectangle from the first stage, not a one-wide line.
         int lExtent;
         int svExtent;
         if (o.wall()) {
             lExtent = s.lock1 != null ? s.lock1 : clampExtent(offL, 8);
-            svExtent = s.lock2 != null ? s.lock2 : (s.lock1 != null ? clampExtent(offSV, 8) : 1);
+            svExtent = s.lock2 != null ? s.lock2 : clampExtent(offSV, 8);
         } else {
             svExtent = s.lock1 != null ? s.lock1 : clampExtent(offSV, 8);
-            lExtent = s.lock2 != null ? s.lock2 : (s.lock1 != null ? clampExtent(offL, 8) : 1);
+            lExtent = s.lock2 != null ? s.lock2 : clampExtent(offL, 8);
         }
         BlockVector inPlaneAnchor = shift(anchor, o.l(), Measurement.negativeAnchorShift(lExtent));
         inPlaneAnchor = shift(inPlaneAnchor, o.s(), Measurement.negativeAnchorShift(svExtent));

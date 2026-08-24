@@ -54,7 +54,6 @@ public record Dims(int primary, int secondary, int tertiary) {
     /** {@code {min, max}} for the given axis (0=primary, 1=secondary, 2=tertiary), per §6. */
     private static int[] bounds(Form form, int axisIndex) {
         return switch (form) {
-            case SINGLE -> new int[]{1, 1};
             case DIAGONAL -> switch (axisIndex) {
                 case 0 -> new int[]{1, 8}; // run
                 case 1 -> new int[]{1, 5}; // width (tread)

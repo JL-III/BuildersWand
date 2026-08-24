@@ -1,16 +1,15 @@
 # BuildersWand — Materializer
 
 A Paper plugin. Hold the Builders Wand, aim at a surface, and right-click to anchor one of
-five parametric forms; stretch it to size with staged right-clicks while a per-player glowing
+four parametric forms; stretch it to size with staged right-clicks while a per-player glowing
 ghost shows exactly what will be built; the final right-click prints it cell-by-cell using
 blocks consumed from your inventory — or is precisely refused with a message naming why,
 having changed and spent nothing.
 
-## The five forms
+## The four forms
 
 | Form | Shape | Dimensions | Max cells |
 |---|---|---|---|
-| **Single** | one block — the plain hand | fixed 1×1×1 | 1 |
 | **Diagonal** | a solid stair run | run 1–8 × tread width 1–5 | 40 |
 | **Box** | a hollow cuboid shell (an extent of 1–2 collapses to a solid plate) | 1–8 per axis | 296 |
 | **Cylinder** | an open tube | size 1–9 × courses 1–8 | 384 |
@@ -27,23 +26,24 @@ the 512-cap are fixed invariants, not config.
 2. Hold a **placeable solid block in your off hand** — that block is the print material
    (doors, beds, and shulker boxes are not allowed). Cost is one item per placed cell.
 3. **Right-click a surface** to anchor. A purple, glowing, shrunken-block ghost tracks your
-   aim; the action bar shows the size, cell counts, material, and the next step.
+   aim; the action bar shows the size, cell counts, material, and the next step. The ghost is
+   drawn only on cells that will actually be placed — cells already occupied by blocks (the
+   ground, an existing wall) are shown as `kept` in the action bar, not ghosted.
 4. **Right-click** to lock each stage (length / width / height, or radius), then a final
-   right-click **prints**. Single prints on the first click with no ghost.
+   right-click **prints**.
 5. **Left-click cancels.** The gesture also drops if you switch hotbar slots away from the
    wand, change the wand's form, die, or change worlds.
 
 Blocks appear one per tick (one per two ticks for small prints ≤ 16 cells) with place sounds.
 Cells that are already built are **kept and never charged**; a print completes a partial
-shape. A living body inside a multi-cell print is lifted on top; a Single refuses if a body
-is in the way. Creative mode prints free. There is no undo — mine printed blocks to reclaim
-them (vanilla drops). Mid-print interruptions (a block appears, permission is lost, you log
-out) stop the wave and refund the unspent items.
+shape. A living body inside the print is lifted on top. Creative mode prints free. There is
+no undo — mine printed blocks to reclaim them (vanilla drops). Mid-print interruptions (a
+block appears, permission is lost, you log out) stop the wave and refund the unspent items.
 
 ## Commands
 
 - `/wand give [player]` — give a wand (self if no player). Requires `builderswand.give`.
-- `/wand form <single|diagonal|box|cylinder|sphere>` — set the held wand's form. Requires
+- `/wand form <diagonal|box|cylinder|sphere>` — set the held wand's form. Requires
   `builderswand.use`.
 - `/wand` — show the held wand's form, the current off-hand material, and usage.
 

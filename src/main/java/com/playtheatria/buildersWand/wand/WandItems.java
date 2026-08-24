@@ -56,20 +56,20 @@ public final class WandItems {
         return meta != null && meta.getPersistentDataContainer().has(wandKey, PersistentDataType.BYTE);
     }
 
-    /** PDC form, defaulting to {@link Form#SINGLE} if absent or unknown. */
+    /** PDC form, defaulting to {@link Form#DEFAULT} if absent or unknown. */
     public Form getForm(ItemStack item) {
         if (item == null) {
-            return Form.SINGLE;
+            return Form.DEFAULT;
         }
         ItemMeta meta = item.getItemMeta();
         if (meta == null) {
-            return Form.SINGLE;
+            return Form.DEFAULT;
         }
         String key = meta.getPersistentDataContainer().get(formKey, PersistentDataType.STRING);
         if (key == null) {
-            return Form.SINGLE;
+            return Form.DEFAULT;
         }
-        return Form.fromKey(key).orElse(Form.SINGLE);
+        return Form.fromKey(key).orElse(Form.DEFAULT);
     }
 
     public void setForm(ItemStack item, Form form) {

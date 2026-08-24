@@ -2,7 +2,6 @@ package com.playtheatria.buildersWand.wave;
 
 import com.playtheatria.buildersWand.config.PluginConfig;
 import com.playtheatria.buildersWand.form.Dims;
-import com.playtheatria.buildersWand.form.Form;
 import com.playtheatria.buildersWand.protect.ProtectionBridge;
 import com.playtheatria.buildersWand.utils.Err;
 import com.playtheatria.buildersWand.wand.WandItems;
@@ -13,7 +12,6 @@ import org.bukkit.Chunk;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
@@ -118,15 +116,7 @@ public final class WaveRunner {
             return false;
         }
 
-        // 8. Single form only: a body in the way refuses (multi-cell waves push instead)
-        if (plan.form() == Form.SINGLE) {
-            for (Location loc : printable) {
-                if (bodyIntersects(plan.world(), loc)) {
-                    player.sendMessage(red("A body is in the way at " + coords(loc) + "."));
-                    return false;
-                }
-            }
-        }
+        // 8. (Single removed) — all forms push bodies clear mid-wave (§10.4) rather than refuse.
 
         // 9. Feedstock
         boolean creative = player.getGameMode() == GameMode.CREATIVE;
@@ -354,13 +344,6 @@ public final class WaveRunner {
     }
 
     // ---------------------------------------------------------------- helpers
-
-    private boolean bodyIntersects(World world, Location cell) {
-        BoundingBox cellBox = new BoundingBox(
-                cell.getBlockX(), cell.getBlockY(), cell.getBlockZ(),
-                cell.getBlockX() + 1, cell.getBlockY() + 1, cell.getBlockZ() + 1);
-        return !world.getNearbyEntities(cellBox, e -> e instanceof LivingEntity).isEmpty();
-    }
 
     private static String coords(Location loc) {
         return loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ();

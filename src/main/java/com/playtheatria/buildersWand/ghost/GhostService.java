@@ -78,11 +78,6 @@ public final class GhostService {
             return;
         }
         Form form = wandItems.getForm(mainHand);
-        if (form == Form.SINGLE) {
-            clearFor(player); // Single never shows a ghost
-            return;
-        }
-
         GestureSession session = gestureListener.sessionOf(player);
         if (session == null) {
             // Un-anchored: hint on the action bar, ghost the would-be anchor cell.
@@ -118,6 +113,9 @@ public final class GhostService {
         Set<BlockVector> desired = new HashSet<>();
 
         for (Location loc : plan.cells()) {
+            if (!loc.getBlock().isReplaceable()) {
+                continue; // occupied cell is kept at commit — show no ghost (owner feedback)
+            }
             BlockVector key = new BlockVector(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
             if (!desired.add(key)) {
                 continue;
@@ -206,7 +204,6 @@ public final class GhostService {
             case BOX -> session.orientation.wall()
                     ? (session.stage() == 0 ? "RIGHT locks width" : "RIGHT locks height")
                     : (session.stage() == 0 ? "RIGHT locks length" : "RIGHT locks width");
-            case SINGLE -> "";
         };
     }
 

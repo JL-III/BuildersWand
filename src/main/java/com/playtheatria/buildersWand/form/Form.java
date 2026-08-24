@@ -7,16 +7,17 @@ import java.util.Optional;
  * The five parametric forms of the catalog (design §6). Pure data — no Bukkit world types.
  */
 public enum Form {
-    SINGLE,
     DIAGONAL,
     BOX,
     CYLINDER,
     SPHERE;
 
+    /** The wand's default form (Single was removed; owner feedback 2026-08-24). */
+    public static final Form DEFAULT = BOX;
+
     /** Number of intermediate lock clicks before the print click (design §7.1). */
     public int lockStages() {
         return switch (this) {
-            case SINGLE -> 0;
             case DIAGONAL, CYLINDER, SPHERE -> 1;
             case BOX -> 2;
         };

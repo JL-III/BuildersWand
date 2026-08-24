@@ -72,6 +72,15 @@ public final class GestureListener implements Listener {
 
     @EventHandler
     public void onInteract(PlayerInteractEvent event) {
+        Player player = event.getPlayer();
+        // The off-hand interaction fires as its own event; cancel it so the material block in
+        // the off hand is never placed while a wand is held in the main hand.
+        if (event.getHand() == EquipmentSlot.OFF_HAND) {
+            if (wandItems.isWand(player.getInventory().getItemInMainHand())) {
+                event.setCancelled(true);
+            }
+            return;
+        }
         if (event.getHand() != EquipmentSlot.HAND) {
             return; // mandatory guard against the double-fire
         }
@@ -79,7 +88,6 @@ public final class GestureListener implements Listener {
         if (!wandItems.isWand(item)) {
             return;
         }
-        Player player = event.getPlayer();
         Action action = event.getAction();
         if (action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK) {
             if (sessions.containsKey(player.getUniqueId())) {
@@ -97,12 +105,7 @@ public final class GestureListener implements Listener {
     private void handleRightClick(Player player, ItemStack wand) {
         GestureSession session = sessions.get(player.getUniqueId());
         if (session == null) {
-            Form form = wandItems.getForm(wand);
-            if (form == Form.SINGLE) {
-                printSingle(player);
-            } else {
-                tryAnchor(player, form);
-            }
+            tryAnchor(player, wandItems.getForm(wand));
             return;
         }
         if (session.stage() < session.form.lockStages()) {
@@ -122,19 +125,6 @@ public final class GestureListener implements Listener {
         }
         if (waveRunner.commit(player, plan.get())) {
             clearSession(player); // gesture clears only after a successful commit
-        }
-    }
-
-    private void printSingle(Player player) {
-        Optional<Plan> plan = LivePlan.single(player, config, wandItems);
-        if (plan.isPresent()) {
-            waveRunner.commit(player, plan.get());
-            return;
-        }
-        if (LivePlan.wouldBeAnchor(player, config).isEmpty()) {
-            player.sendActionBar(Component.text(AIM_HINT));
-        } else {
-            player.sendMessage(red("Hold a placeable block in your off hand to choose the material."));
         }
     }
 

@@ -44,15 +44,14 @@ public final class Expansion {
     }
 
     /**
-     * Expanded cell count (design §6): closed-form for single/box/diagonal, generated-and-
-     * counted for cylinder/sphere/capsule. Does not validate — used by {@link Dims#validated}.
+     * Expanded cell count (design §6): closed-form for box/diagonal, generated-and-counted
+     * for cylinder/sphere/capsule. Does not validate — used by {@link Dims#validated}.
      */
     public static int cellCount(Form form, Dims dims) {
         int p = dims.primary();
         int sSpan = dims.secondary();
         int t = dims.tertiary();
         return switch (form) {
-            case SINGLE -> 1;
             case DIAGONAL -> p * sSpan; // run × width (§6.2)
             case BOX -> p * sSpan * t
                     - Math.max(p - 2, 0) * Math.max(sSpan - 2, 0) * Math.max(t - 2, 0); // §6.3
@@ -65,7 +64,6 @@ public final class Expansion {
 
     private static List<int[]> abstractCells(Form form, Dims dims) {
         return switch (form) {
-            case SINGLE -> List.of(new int[]{0, 0, 0});
             case DIAGONAL -> diagonalCells(dims.primary(), dims.secondary());
             case BOX -> boxCells(dims.primary(), dims.secondary(), dims.tertiary());
             case CYLINDER -> cylinderCells(dims.primary(), dims.secondary());
