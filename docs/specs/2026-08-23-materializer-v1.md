@@ -36,6 +36,9 @@ nothing.
   voxels-slim: every rule is restated in the design doc with formulas and golden numbers.
 - **Ghost scale:** pinned 0.8 (owner saw the 0.95 alternative and the rationale for 0.8;
   it is config-tunable via `ghost.scale`).
+- **Placement logging (amendment 2026-08-25):** owner ruling "We are using logblock not
+  core protect" — every printed cell is queued to LogBlock under the player's own Actor
+  so lookups and rollbacks work exactly as for hand placement (design §10.3 step 5, §12).
 
 ## 3. Scope and non-goals
 
@@ -76,7 +79,8 @@ paper-api `26.1.2.build.74-stable` (javadocs: https://jd.papermc.io/paper/26.1.2
 `public final class BuildersWandPlugin extends JavaPlugin`.
 `onEnable()` order: load `PluginConfig` (saves default `config.yml` via
 `saveDefaultConfig()`); construct `WandItems` (needs plugin for `NamespacedKey`);
-construct `ProtectionBridge.composite(this)`; construct `WaveRunner`; construct
+construct `ProtectionBridge.composite(this)`; construct
+`PlacementLogger.composite(this)`; construct `WaveRunner`; construct
 `GhostService`; register `GestureListener` and `WandCommand`
 (`getCommand("wand").setExecutor(...)` + `setTabCompleter(...)`); start GhostService's
 repeating task. `onDisable()`: `waveRunner.stopAll(StopReason.SERVER_STOPPING)` then
@@ -227,10 +231,10 @@ lazily while any wave exists.
   `wave.creative`), add `chunk.addPluginChunkTicket(plugin)` for every chunk covering
   the plan, register the wave, message §13 success.
 - Per scheduled cell: the design §10.3 steps in order (protection re-check → replaceable
-  re-check → entity push → place `material.createBlockData()` with
-  `block.setBlockData(data, true)` → place sound via
-  `world.playSound(loc, block.getBlockSoundGroup().getPlaceSound(), 1.0f, 1.0f)` after
-  setting). Maintain the invariant `reserved == printable.size() − completed` for
+  re-check → entity push → capture `BlockState before = block.getState()` → place
+  `material.createBlockData()` with `block.setBlockData(data, true)` → place sound via
+  `world.playSound(loc, block.getBlockSoundGroup().getPlaceSound(), 1.0f, 1.0f)` →
+  `placementLogger.logPlacement(player, before, block.getState())`). Maintain the invariant `reserved == printable.size() − completed` for
   non-creative waves; if it ever fails, stop the wave with a refund of `reserved` and
   `getLogger().severe(...)` naming the counts (this is the invariant's runtime tooth).
 - Body push exactly design §10.4 (scan up to +12 for two passable blocks not in the
@@ -267,10 +271,38 @@ return area.hasRoleFlag(player.getUniqueId(), Flags.BLOCK_PLACE);
 ```
 with `landsIntegration = LandsIntegration.of(plugin)` created once
 (`me.angeschossen.lands.api.LandsIntegration`,
-`me.angeschossen.lands.api.flags.type.Flags`). **Sole permitted adaptation point:** if
-one of these three member names differs in LandsAPI 7.25.4, use that version's documented
+`me.angeschossen.lands.api.flags.type.Flags`). **Permitted adaptation point:** if one of
+these three member names differs in LandsAPI 7.25.4, use that version's documented
 equivalent of "may this player place a block at this location" — same semantics, confined
-to this file. Everything else in this spec is exact.
+to this file.
+
+**`PlacementLogger.java`** — `public interface PlacementLogger { void logPlacement(
+Player player, BlockState before, BlockState after); }` plus
+`static PlacementLogger composite(Plugin plugin)`: if
+`Bukkit.getPluginManager().getPlugin("LogBlock") != null`, return `new LogBlockHook()`;
+otherwise a no-op.
+
+**`LogBlockHook.java`** —
+```java
+// de.diddiz.LogBlock.LogBlock, .Consumer, .Actor
+private final Consumer consumer =
+        ((LogBlock) Bukkit.getPluginManager().getPlugin("LogBlock")).getConsumer();
+
+public void logPlacement(Player player, BlockState before, BlockState after) {
+    Actor actor = Actor.actorFromEntity(player);
+    if (before.getType().isAir()) {
+        consumer.queueBlockPlace(actor, after);
+    } else {
+        consumer.queueBlockReplace(actor, before, after);
+    }
+}
+```
+**Permitted adaptation point (the only other one):** LogBlock has no current public
+artifact, so this compiles against the production server's own jar (§5.10); if a member
+name differs in that jar, use its documented equivalent of "queue a player-attributed
+block place/replace" — same semantics, confined to this file. Always the player's own
+`Actor`, never a `#builderswand`-style machine actor. Everything else in this spec is
+exact.
 
 ### 5.9 `command/WandCommand.java`
 
@@ -299,6 +331,7 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.17")
     compileOnly("com.github.Angeschossen:LandsAPI:7.25.4")
+    compileOnly(files("libs/logblock.jar"))
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("io.papermc.paper:paper-api:26.1.2.build.74-stable")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -315,7 +348,7 @@ name: BuildersWand
 version: '${version}'
 main: com.playtheatria.buildersWand.BuildersWandPlugin
 api-version: '26.1'
-softdepend: [WorldGuard, Lands]
+softdepend: [WorldGuard, Lands, LogBlock]
 commands:
   wand:
     description: The Builders Wand materializer
@@ -332,6 +365,13 @@ permissions:
 that is the only permitted edit to this file.)
 
 **`src/main/resources/config.yml`** — exactly the design §14.3 block.
+
+**`libs/logblock.jar`** — the LogBlock jar from the production Theatria server, placed by
+the owner before checkpoint 4; there is no current public LogBlock artifact (Maven and
+GitHub releases are years stale — verified 2026-08-25), and downloading LogBlock from
+anywhere else is not permitted. Add `libs/*.jar` to `.gitignore`. If the jar is absent,
+`./gradlew build` fails compiling `LogBlockHook` — that failure means "ask the owner for
+the jar", nothing else.
 
 ## 6. Invariants and their enforcement (same slice)
 
@@ -369,7 +409,7 @@ design §18 acceptance list — every refusal row there must be exercised in the
 
 ## 8. Acceptance conditions
 
-Design §18, items 1–12, verbatim and frozen. Playtest door for the maintainer:
+Design §18, items 1–13, verbatim and frozen. Playtest door for the maintainer:
 
 ```
 cd /Users/jesse/Development/BuildersWand-worktrees/materializer-v1 && ./gradlew runServer
@@ -390,8 +430,8 @@ Gate after every checkpoint: `./gradlew build` green (compiles + tests). Do not 
    compiling with an empty enable/disable.
 2. `form: parametric catalog with golden-vector tests` — §5.4 + all §7 tests.
 3. `wand: PDC identity, /wand command, config` — §5.3, §5.9, §5.2.
-4. `wave: feedstock, protection bridge, wave runner` — §5.7, §5.8 (commit callable, no
-   caller yet).
+4. `wave: feedstock, protection bridge, placement logger, wave runner` — §5.7, §5.8
+   (commit callable, no caller yet; requires `libs/logblock.jar` from the owner).
 5. `gesture: anchor/lock/print wiring` — §5.5; Single and all forms print end-to-end.
    First `runServer` smoke here.
 6. `ghost: display-entity preview and action bar` — §5.6.
@@ -423,5 +463,8 @@ Gate after every checkpoint: `./gradlew build` green (compiles + tests). Do not 
   (design §10.4). Single-cell refuses (design §9 step 8).
 - **No ProtocolLib, no packets, no resource packs** — Bukkit/Paper API only (owner
   ruling: zero packet dependencies).
+- **Never fire synthetic `BlockPlaceEvent`s** for wave cells (side effects in every other
+  listener) and **never log to LogBlock under a machine actor** — the player's own
+  `Actor`, always, so their rollbacks include wand prints.
 - **Do not touch `develop2` or `master`**; all commits on `feature/materializer-v1`; do
   not push without the owner's say-so.
