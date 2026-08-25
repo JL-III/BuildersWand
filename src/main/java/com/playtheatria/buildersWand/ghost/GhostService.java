@@ -48,10 +48,11 @@ public final class GhostService {
     private static final String AIM_HINT = "Aim at a surface; RIGHT-CLICK anchors there.";
     private static final Color UNAFFORDABLE = Color.fromRGB(0xFF, 0x2D, 0x2D); // cells you can't afford
 
-    // The idle "how to use" hint breathes over PULSE_PERIOD ticks, is drawn for PULSE_SHOW of
-    // them, then stays silent for the rest so other plugins' action-bar messages can show.
+    // The idle "how to use" hint shows for PULSE_SHOW of every PULSE_PERIOD ghost ticks, then
+    // nothing at all for the rest — so it never holds the action bar hostage: other plugins'
+    // messages can take the bar during the gap, and Minecraft fades the hint out on its own.
     private static final int PULSE_PERIOD = 40;
-    private static final int PULSE_SHOW = 22;
+    private static final int PULSE_SHOW = 18;
     private static final TextColor HINT_COLOR = TextColor.color(0x55, 0xFF, 0xFF); // aqua
 
     private final JavaPlugin plugin;
@@ -127,20 +128,14 @@ public final class GhostService {
     }
 
     /**
-     * Send the idle hint with a breathing fade during the show window, and nothing during the
-     * silent gap — so the hint pulses and other action-bar messages get a chance to appear.
+     * Show the idle hint during the show window, and send nothing during the gap — so the hint
+     * pulses (Minecraft fades it out on its own) without ever holding the action bar hostage,
+     * leaving the gap free for other plugins' messages.
      */
     private void sendPulsedHint(Player player, String text) {
-        int phase = pulseTick % PULSE_PERIOD;
-        if (phase >= PULSE_SHOW) {
-            return; // silent gap
+        if (pulseTick % PULSE_PERIOD < PULSE_SHOW) {
+            player.sendActionBar(Component.text(text, HINT_COLOR));
         }
-        float brightness = (float) Math.sin(Math.PI * phase / PULSE_SHOW); // 0 → 1 → 0
-        TextColor color = TextColor.color(
-                (int) (HINT_COLOR.red() * brightness),
-                (int) (HINT_COLOR.green() * brightness),
-                (int) (HINT_COLOR.blue() * brightness));
-        player.sendActionBar(Component.text(text, color));
     }
 
     // ---------------------------------------------------------------- ghost diff (design §8.3)
