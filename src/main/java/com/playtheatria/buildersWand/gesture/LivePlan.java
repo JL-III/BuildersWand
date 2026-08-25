@@ -40,9 +40,19 @@ public final class LivePlan {
     private LivePlan() {
     }
 
+    /**
+     * The aim ray against solid blocks, ignoring passable ones (short grass, flowers, …) and
+     * fluids — so aiming through grass anchors in the grass cell, like normal placement.
+     */
+    public static RayTraceResult rayTrace(Player player, PluginConfig config) {
+        Location eye = player.getEyeLocation();
+        return player.getWorld().rayTraceBlocks(
+                eye, eye.getDirection(), config.anchorReach, FluidCollisionMode.NEVER, true);
+    }
+
     /** The cell the first click would anchor (aimed block + face normal), or empty. */
     public static Optional<BlockVector> wouldBeAnchor(Player player, PluginConfig config) {
-        RayTraceResult hit = player.rayTraceBlocks(config.anchorReach, FluidCollisionMode.NEVER);
+        RayTraceResult hit = rayTrace(player, config);
         if (hit == null || hit.getHitBlock() == null || hit.getHitBlockFace() == null) {
             return Optional.empty();
         }

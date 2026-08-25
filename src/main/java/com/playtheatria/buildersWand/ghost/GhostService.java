@@ -50,9 +50,10 @@ public final class GhostService {
 
     // The idle "how to use" hint shows for PULSE_SHOW of every PULSE_PERIOD ghost ticks, then
     // nothing at all for the rest — so it never holds the action bar hostage: other plugins'
-    // messages can take the bar during the gap, and Minecraft fades the hint out on its own.
-    private static final int PULSE_PERIOD = 40;
-    private static final int PULSE_SHOW = 18;
+    // messages can take the bar during the (long) gap, and Minecraft fades the hint out on its
+    // own. At the default 2-tick update this is ~1.2s shown out of a ~6s cycle.
+    private static final int PULSE_PERIOD = 60;
+    private static final int PULSE_SHOW = 12;
     private static final TextColor HINT_COLOR = TextColor.color(0x55, 0xFF, 0xFF); // aqua
 
     private final JavaPlugin plugin;

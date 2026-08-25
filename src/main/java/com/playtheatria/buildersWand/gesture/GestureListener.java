@@ -9,7 +9,6 @@ import com.playtheatria.buildersWand.wave.StopReason;
 import com.playtheatria.buildersWand.wave.WaveRunner;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.bukkit.FluidCollisionMode;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
@@ -139,7 +138,7 @@ public final class GestureListener implements Listener {
     }
 
     private void tryAnchor(Player player, Form form) {
-        RayTraceResult hit = player.rayTraceBlocks(config.anchorReach, FluidCollisionMode.NEVER);
+        RayTraceResult hit = LivePlan.rayTrace(player, config);
         if (hit == null || hit.getHitBlock() == null || hit.getHitBlockFace() == null) {
             player.sendActionBar(Component.text(AIM_HINT));
             return;
