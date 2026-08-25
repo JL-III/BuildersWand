@@ -117,3 +117,6 @@ runs/
 
 # Avoid ignoring Gradle wrapper jar file (.jar files are usually ignored)
 !gradle-wrapper.jar
+
+# LogBlock (and any other) local-only jars supplied by the server owner
+libs/*.jar

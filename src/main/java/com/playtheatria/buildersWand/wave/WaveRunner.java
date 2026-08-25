@@ -2,6 +2,7 @@ package com.playtheatria.buildersWand.wave;
 
 import com.playtheatria.buildersWand.config.PluginConfig;
 import com.playtheatria.buildersWand.form.Dims;
+import com.playtheatria.buildersWand.protect.PlacementLogger;
 import com.playtheatria.buildersWand.protect.ProtectionBridge;
 import com.playtheatria.buildersWand.utils.Err;
 import com.playtheatria.buildersWand.wand.WandItems;
@@ -13,6 +14,7 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -39,15 +41,18 @@ public final class WaveRunner {
 
     private final JavaPlugin plugin;
     private final ProtectionBridge protection;
+    private final PlacementLogger placementLogger;
     private final PluginConfig config;
     private final WandItems wandItems;
     private final Map<UUID, Wave> waves = new java.util.HashMap<>();
 
     private BukkitTask task;
 
-    public WaveRunner(JavaPlugin plugin, ProtectionBridge protection, PluginConfig config, WandItems wandItems) {
+    public WaveRunner(JavaPlugin plugin, ProtectionBridge protection, PlacementLogger placementLogger,
+                      PluginConfig config, WandItems wandItems) {
         this.plugin = plugin;
         this.protection = protection;
+        this.placementLogger = placementLogger;
         this.config = config;
         this.wandItems = wandItems;
     }
@@ -194,9 +199,13 @@ public final class WaveRunner {
             stop(wave, player, StopReason.OUT_OF_MATERIAL, null);
             return;
         }
-        // 5. Place the oriented state with physics, then play the placed block's sound
+        // 5. Capture the prior state, place with physics, play the sound, then log the change to
+        //    the grief tracker under the player (design §10.3 step 4-5). Plugin placements fire
+        //    no BlockPlaceEvent, so this is what makes prints show up in lookups/rollbacks.
+        BlockState before = block.getState();
         block.setBlockData(wave.blockData, true);
         wave.world.playSound(loc, block.getBlockSoundGroup().getPlaceSound(), 1.0f, 1.0f);
+        placementLogger.logPlacement(player, before, block.getState());
         // 6. Account
         wave.completed++;
         if (wave.completed >= wave.total()) {

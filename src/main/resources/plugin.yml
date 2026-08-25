@@ -2,7 +2,7 @@ name: BuildersWand
 version: '${version}'
 main: com.playtheatria.buildersWand.BuildersWandPlugin
 api-version: '26.1'
-softdepend: [WorldGuard, Lands]
+softdepend: [WorldGuard, Lands, LogBlock]
 commands:
   wand:
     description: The Builders Wand materializer

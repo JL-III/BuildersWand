@@ -4,6 +4,7 @@ import com.playtheatria.buildersWand.command.WandCommand;
 import com.playtheatria.buildersWand.config.PluginConfig;
 import com.playtheatria.buildersWand.ghost.GhostService;
 import com.playtheatria.buildersWand.gesture.GestureListener;
+import com.playtheatria.buildersWand.protect.PlacementLogger;
 import com.playtheatria.buildersWand.protect.ProtectionBridge;
 import com.playtheatria.buildersWand.wand.WandItems;
 import com.playtheatria.buildersWand.wave.StopReason;
@@ -16,6 +17,7 @@ public final class BuildersWandPlugin extends JavaPlugin {
     private PluginConfig config;
     private WandItems wandItems;
     private ProtectionBridge protectionBridge;
+    private PlacementLogger placementLogger;
     private WaveRunner waveRunner;
     private GestureListener gestureListener;
     private GhostService ghostService;
@@ -25,7 +27,8 @@ public final class BuildersWandPlugin extends JavaPlugin {
         this.config = new PluginConfig(this);
         this.wandItems = new WandItems(this);
         this.protectionBridge = ProtectionBridge.composite(this);
-        this.waveRunner = new WaveRunner(this, protectionBridge, config, wandItems);
+        this.placementLogger = PlacementLogger.composite(this);
+        this.waveRunner = new WaveRunner(this, protectionBridge, placementLogger, config, wandItems);
         this.gestureListener = new GestureListener(wandItems, config, waveRunner);
         this.ghostService = new GhostService(this, config, wandItems, waveRunner, gestureListener);
         gestureListener.setGhostClearer(ghostService::clearFor);
