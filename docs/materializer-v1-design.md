@@ -1,5 +1,10 @@
 # BuildersWand Materializer — v1 Design
 
+> **Historical frozen contract:** Later owner-approved additions add water printing, PDC
+> Uses/provenance, Denarii Use restoration, durable recognition stats, and left-click-first controls.
+> The current behavior and configuration are documented in [`README.md`](../README.md); those
+> additions supersede conflicting names, controls, and resource rules below without rewriting this record.
+
 **Status:** Frozen for implementation · 2026-08-23
 **Owner:** Jesse (JL-III) · **Target:** Paper 26.1.2, Java 21
 **Source of truth for ported rules:** the voxels-slim Materializer as shipped
@@ -347,9 +352,14 @@ Always at most one cell per tick. (Config keys in §14.3; defaults are the 1:1 v
 1. Re-check protection on this cell (§12) → denial **stops** the wave before it.
 2. Cell no longer replaceable → **stop** before it (mid-wave is stop, not skip — 1:1).
 3. Living entity intersects → push (§10.4); failure → **stop**.
-4. Place `material.createBlockData()` with `applyPhysics = true` (sand may fall, water may
-   flow — vanilla-honest, accepted), play the block's place sound at the cell.
-5. `completed += 1`, `reserved −= 1`. Last cell → settle: release tickets, action bar
+4. Capture the cell's prior `BlockState`, then place `material.createBlockData()` with
+   `applyPhysics = true` (sand may fall, water may flow — vanilla-honest, accepted), play
+   the block's place sound at the cell.
+5. Queue the change to LogBlock under the **player's own actor** (place if the prior
+   state was air, replace otherwise — so a rollback restores printed-over grass/water).
+   Plugin placements fire no `BlockPlaceEvent`, so without this the print is invisible
+   to grief investigation (§12).
+6. `completed += 1`, `reserved −= 1`. Last cell → settle: release tickets, action bar
    `Printed {printable} {material}.`
 
 **Stop** = release tickets + refund `reserved` items via `player.getInventory().addItem`
@@ -391,6 +401,14 @@ resolved at enable time, each behind a classpath/plugin-presence check:
 - **Lands** (softdepend): the LandsIntegration area lookup + block-place flag check for the
   player at that location (use the Lands API's documented block-place test).
 - Absent plugin → its hook contributes `true`. All hooks must pass.
+
+**Placement logging (LogBlock)** — a sibling `PlacementLogger` seam (softdepend,
+no-op when LogBlock is absent): after every placed cell, queue the change to LogBlock's
+`Consumer` attributed to the printing player's `Actor` — `queueBlockPlace` when the
+prior state was air, `queueBlockReplace(before, after)` otherwise. The wand is the
+player acting, so lookups and per-player rollbacks behave exactly as hand placement;
+never log under a `#builderswand`-style machine actor. (Owner ruling 2026-08-25:
+Theatria runs LogBlock, not CoreProtect.)
 
 ## 13. Messages (exact strings)
 
@@ -447,7 +465,7 @@ The 512-cell cap and dims bounds are **constants, not config** (invariants, 1:1)
 
 ### 14.4 plugin.yml
 `api-version: '26.1'` (Paper 26.1.2 accepts up to `'26.2'`; if the server warns at boot,
-use `'26.1.2'`). `softdepend: [WorldGuard, Lands]`.
+use `'26.1.2'`). `softdepend: [WorldGuard, Lands, LogBlock]`.
 
 ## 15. Existing-code disposition
 
@@ -462,7 +480,7 @@ use `'26.1.2'`). `softdepend: [WorldGuard, Lands]`.
 | `workload/Workload*.java`, `DistributedFiller.java` | Deleted; the wave runner supersedes the time-budget queue (cadence-paced, per-player, with refunds) |
 | `utils/ConfigManager.java` | Rewritten: loads §14.3 config.yml |
 | `utils/Result.java`, `Ok.java`, `Err.java` | Kept (used for refusal plumbing) |
-| `build.gradle` | paper-api → `io.papermc.paper:paper-api:26.1.2.build.74-stable`, `runServer` → `26.1.2`; enginehub repo + `com.sk89q.worldguard:worldguard-bukkit:7.0.17` compileOnly; jitpack repo + `com.github.Angeschossen:LandsAPI:7.25.4` compileOnly; JUnit 5 (resolved 2026-08-23 against live repos) |
+| `build.gradle` | paper-api → `io.papermc.paper:paper-api:26.1.2.build.74-stable`, `runServer` → `26.1.2`; enginehub repo + `com.sk89q.worldguard:worldguard-bukkit:7.0.17` compileOnly; jitpack repo + `com.github.Angeschossen:LandsAPI:7.25.4` compileOnly; LogBlock via `compileOnly files("libs/logblock.jar")` — the production server's own jar, no public artifact is current (verified 2026-08-25); JUnit 5 (other coordinates resolved 2026-08-23 against live repos) |
 
 ## 16. Package layout
 
@@ -519,6 +537,9 @@ Unit tests (JUnit 5, no server):
 11. Single form: right-click places exactly one offhand-material block, one item consumed,
     no ghost ever.
 12. Vanilla client, no resource pack, no client mod — everything above holds.
+13. With LogBlock running: a lookup on a printed cell attributes the placement to the
+    printing player; printing over tall grass records a replace whose rollback restores
+    the grass; rolling back the player reverts the whole print.
 
 ## 19. Out of scope / future (recorded, not designed)
 

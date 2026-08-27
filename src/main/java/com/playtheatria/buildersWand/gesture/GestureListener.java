@@ -3,19 +3,20 @@ package com.playtheatria.buildersWand.gesture;
 import com.playtheatria.buildersWand.config.PluginConfig;
 import com.playtheatria.buildersWand.form.Form;
 import com.playtheatria.buildersWand.form.Orientation;
+import com.playtheatria.buildersWand.wand.BlockOrientation;
 import com.playtheatria.buildersWand.wand.WandItems;
 import com.playtheatria.buildersWand.wave.Plan;
 import com.playtheatria.buildersWand.wave.StopReason;
 import com.playtheatria.buildersWand.wave.WaveRunner;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
-import org.bukkit.FluidCollisionMode;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
@@ -40,7 +41,7 @@ import java.util.function.Consumer;
  */
 public final class GestureListener implements Listener {
 
-    private static final String AIM_HINT = "Aim at a surface; RIGHT-CLICK anchors there.";
+    private static final String AIM_HINT = "Aim at a surface; LEFT-CLICK anchors there.";
 
     private final WandItems wandItems;
     private final PluginConfig config;
@@ -89,23 +90,40 @@ public final class GestureListener implements Listener {
         if (!wandItems.isWand(item) || !canUse) {
             return; // no permission → the wand is an inert stick
         }
+        if (item.getAmount() != 1) {
+            event.setCancelled(true);
+            clearSession(player);
+            player.sendMessage(red("Builders Wands cannot be used while stacked. Separate them first."));
+            return;
+        }
+        wandItems.ensureFirstWielder(item, player);
+        player.getInventory().setItemInMainHand(item);
         Action action = event.getAction();
         if (action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK) {
+            event.setCancelled(true); // suppress block damage before advancing the gesture
             if (player.isSneaking()) {
-                event.setCancelled(true);
-                wandItems.cycleRotation(item); // rotate placement; keep the live gesture
-            } else if (sessions.containsKey(player.getUniqueId())) {
-                event.setCancelled(true);
-                clearSession(player);
+                cycleForm(player, item);
+            } else {
+                if (!player.hasPermission(WandItems.PERMISSION_USES_BYPASS)
+                        && wandItems.uses(item).depleted()) {
+                    clearSession(player);
+                    player.sendMessage(red("The Builders Wand has no Uses remaining. Restore them with /wand restore."));
+                    return;
+                }
+                advanceGesture(player, item);
             }
             return;
         }
         if (action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK) {
             event.setCancelled(true);
             if (player.isSneaking()) {
-                cycleForm(player, item);
-            } else {
-                handleRightClick(player, item);
+                int rotation = wandItems.cycleRotation(item); // keep the live gesture
+                player.getInventory().setItemInMainHand(item);
+                player.sendActionBar(Component.text("Rotation: " + (rotation + 1)
+                        + "/" + BlockOrientation.STATES,
+                        NamedTextColor.GOLD));
+            } else if (sessions.containsKey(player.getUniqueId())) {
+                clearSession(player);
             }
         }
     }
@@ -114,11 +132,12 @@ public final class GestureListener implements Listener {
         Form[] forms = Form.values();
         Form next = forms[(wandItems.getForm(wand).ordinal() + 1) % forms.length];
         wandItems.setForm(wand, next);
+        player.getInventory().setItemInMainHand(wand);
         clearSession(player); // form change drops the anchor (design §5.1)
-        // The new form shows in the wand's item name and the un-anchored action bar hint.
+        player.sendActionBar(Component.text("Mode: " + next.label(), NamedTextColor.GOLD));
     }
 
-    private void handleRightClick(Player player, ItemStack wand) {
+    private void advanceGesture(Player player, ItemStack wand) {
         GestureSession session = sessions.get(player.getUniqueId());
         if (session == null) {
             tryAnchor(player, wandItems.getForm(wand));
@@ -130,7 +149,7 @@ public final class GestureListener implements Listener {
         }
         Optional<Plan> plan = LivePlan.derive(player, session, config, wandItems);
         if (plan.isEmpty()) {
-            player.sendMessage(red("Hold a placeable block in your off hand to choose the material."));
+            player.sendMessage(red(WandItems.MATERIAL_HINT));
             return;
         }
         if (waveRunner.commit(player, plan.get())) {
@@ -139,13 +158,13 @@ public final class GestureListener implements Listener {
     }
 
     private void tryAnchor(Player player, Form form) {
-        RayTraceResult hit = player.rayTraceBlocks(config.anchorReach, FluidCollisionMode.NEVER);
+        RayTraceResult hit = LivePlan.rayTrace(player, config);
         if (hit == null || hit.getHitBlock() == null || hit.getHitBlockFace() == null) {
             player.sendActionBar(Component.text(AIM_HINT));
             return;
         }
         if (wandItems.selectedMaterial(player).isEmpty()) {
-            player.sendMessage(red("Hold a placeable block in your off hand to choose the material."));
+            player.sendMessage(red(WandItems.MATERIAL_HINT));
             return;
         }
         Block block = hit.getHitBlock();
@@ -157,8 +176,29 @@ public final class GestureListener implements Listener {
                 block.getX() + face.getModX(),
                 block.getY() + face.getModY(),
                 block.getZ() + face.getModZ());
-        session.orientation = Orientation.fromClick(face, player.getLocation().getYaw());
+        session.orientation = orientationFor(form, face, player.getLocation().getYaw());
         sessions.put(player.getUniqueId(), session);
+    }
+
+    private static Orientation orientationFor(Form form, BlockFace clickedFace, float yaw) {
+        // A box always builds as a horizontal footprint + vertical height, so its stage order is
+        // the same everywhere — x or z, then the other, then y. On a wall that means using a
+        // floor-style (up) basis instead of the wall's up-is-an-in-plane-axis basis; floor and
+        // ceiling clicks already do this.
+        if (form == Form.BOX && clickedFace != BlockFace.UP && clickedFace != BlockFace.DOWN) {
+            return Orientation.fromClick(BlockFace.UP, yaw);
+        }
+        return Orientation.fromClick(clickedFace, yaw);
+    }
+
+    /** Left-click is a wand control, never an entity attack. */
+    @EventHandler
+    public void onEntityDamage(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player player
+                && player.hasPermission(WandItems.PERMISSION_USE)
+                && wandItems.isWand(player.getInventory().getItemInMainHand())) {
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler

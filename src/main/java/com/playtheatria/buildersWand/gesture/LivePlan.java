@@ -7,16 +7,17 @@ import com.playtheatria.buildersWand.form.Form;
 import com.playtheatria.buildersWand.form.Measurement;
 import com.playtheatria.buildersWand.form.Orientation;
 import com.playtheatria.buildersWand.wand.BlockOrientation;
+import com.playtheatria.buildersWand.wand.PrintMaterial;
 import com.playtheatria.buildersWand.wand.WandItems;
 import com.playtheatria.buildersWand.wave.Plan;
 import org.bukkit.Bukkit;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Levelled;
 import org.bukkit.entity.Player;
 import org.bukkit.util.BlockVector;
 import org.bukkit.util.RayTraceResult;
@@ -40,9 +41,19 @@ public final class LivePlan {
     private LivePlan() {
     }
 
+    /**
+     * The aim ray against solid blocks, ignoring passable ones (short grass, flowers, …) and
+     * fluids — so aiming through grass anchors in the grass cell, like normal placement.
+     */
+    public static RayTraceResult rayTrace(Player player, PluginConfig config) {
+        Location eye = player.getEyeLocation();
+        return player.getWorld().rayTraceBlocks(
+                eye, eye.getDirection(), config.anchorReach, FluidCollisionMode.NEVER, true);
+    }
+
     /** The cell the first click would anchor (aimed block + face normal), or empty. */
     public static Optional<BlockVector> wouldBeAnchor(Player player, PluginConfig config) {
-        RayTraceResult hit = player.rayTraceBlocks(config.anchorReach, FluidCollisionMode.NEVER);
+        RayTraceResult hit = rayTrace(player, config);
         if (hit == null || hit.getHitBlock() == null || hit.getHitBlockFace() == null) {
             return Optional.empty();
         }
@@ -56,12 +67,15 @@ public final class LivePlan {
 
     /** The live plan for the ghost and the print click. Empty when no valid material. */
     public static Optional<Plan> derive(Player player, GestureSession session, PluginConfig config, WandItems wandItems) {
-        Optional<Material> material = wandItems.selectedMaterial(player);
+        Optional<PrintMaterial> material = wandItems.selectedMaterial(player);
         if (material.isEmpty()) {
             return Optional.empty();
         }
         int rotation = wandItems.getRotation(player.getInventory().getItemInMainHand());
-        BlockData blockData = BlockOrientation.oriented(material.get(), rotation);
+        BlockData blockData = BlockOrientation.oriented(material.get().placedBlock(), rotation);
+        if (material.get().isWater() && blockData instanceof Levelled water) {
+            water.setLevel(0); // source water explicitly, independent of registry defaults
+        }
 
         if (session.anchor == null) {
             Optional<BlockVector> anchor = wouldBeAnchor(player, config); // un-anchored ghost = one cell
