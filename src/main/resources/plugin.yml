@@ -2,15 +2,24 @@ name: BuildersWand
 version: '${version}'
 main: com.playtheatria.buildersWand.BuildersWandPlugin
 api-version: '26.1'
-softdepend: [WorldGuard, Lands, LogBlock]
+softdepend: [WorldGuard, Lands, LogBlock, Vault]
 commands:
   wand:
     description: The Builders Wand materializer
-    usage: /wand [give|form] [args]
+    usage: /wand [stats|give|form|restore|setuses] [args]
 permissions:
   builderswand.use:
     description: Use the Builders Wand and /wand form
-    default: op
+    default: true
   builderswand.give:
     description: Give a Builders Wand
+    default: op
+  builderswand.refill:
+    description: Restore Uses on a held Builders Wand with the server economy
+    default: true
+  builderswand.uses.bypass:
+    description: Print without consuming Builders Wand uses
+    default: op
+  builderswand.admin.setuses:
+    description: Set the remaining Uses on the Builders Wand held by the administrator
     default: op

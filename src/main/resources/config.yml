@@ -6,4 +6,19 @@ ghost:
   update-ticks: 2
   scale: 0.8
   glow-rgb: "9E3DFF"
+wand:
+  # Configure the initial purchase price on the Essentials [Kit] sign that issues the wand.
+  max-uses: 5000
+  # Solid blocks cost 1 Use; each materialized water source costs this many Uses.
+  water-uses-per-source: 3
+  refill:
+    # Every full and partial Use-restoration quote is derived from this configurable unit price.
+    denarii-per-use: 50
+    minimum-uses: 100
+    confirmation-seconds: 30
+recognition:
+  announcements: true
+  # Each player is announced exactly once when their durable actual-placement total reaches a milestone.
+  total-block-milestones:
+    - 1000000
 anchor-reach: 16

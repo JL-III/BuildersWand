@@ -7,16 +7,17 @@ import com.playtheatria.buildersWand.form.Form;
 import com.playtheatria.buildersWand.form.Measurement;
 import com.playtheatria.buildersWand.form.Orientation;
 import com.playtheatria.buildersWand.wand.BlockOrientation;
+import com.playtheatria.buildersWand.wand.PrintMaterial;
 import com.playtheatria.buildersWand.wand.WandItems;
 import com.playtheatria.buildersWand.wave.Plan;
 import org.bukkit.Bukkit;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
-import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Levelled;
 import org.bukkit.entity.Player;
 import org.bukkit.util.BlockVector;
 import org.bukkit.util.RayTraceResult;
@@ -66,12 +67,15 @@ public final class LivePlan {
 
     /** The live plan for the ghost and the print click. Empty when no valid material. */
     public static Optional<Plan> derive(Player player, GestureSession session, PluginConfig config, WandItems wandItems) {
-        Optional<Material> material = wandItems.selectedMaterial(player);
+        Optional<PrintMaterial> material = wandItems.selectedMaterial(player);
         if (material.isEmpty()) {
             return Optional.empty();
         }
         int rotation = wandItems.getRotation(player.getInventory().getItemInMainHand());
-        BlockData blockData = BlockOrientation.oriented(material.get(), rotation);
+        BlockData blockData = BlockOrientation.oriented(material.get().placedBlock(), rotation);
+        if (material.get().isWater() && blockData instanceof Levelled water) {
+            water.setLevel(0); // source water explicitly, independent of registry defaults
+        }
 
         if (session.anchor == null) {
             Optional<BlockVector> anchor = wouldBeAnchor(player, config); // un-anchored ghost = one cell

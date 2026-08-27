@@ -1,5 +1,10 @@
 # Implementation spec — BuildersWand Materializer v1
 
+> **Historical frozen spec:** Later owner-approved additions add water printing, PDC
+> Uses/provenance, Denarii Use restoration, durable recognition stats, and left-click-first controls. See
+> [`README.md`](../../README.md) for current behavior; those additions supersede conflicting names
+> controls, and resource rules below without silently rewriting this frozen implementation record.
+
 **Date:** 2026-08-23 · **Branch:** `feature/materializer-v1` (based on `develop2` @ 9a4a7bd)
 **Worktree:** `/Users/jesse/Development/BuildersWand-worktrees/materializer-v1`
 **Design contract:** [`docs/materializer-v1-design.md`](../materializer-v1-design.md) — in this

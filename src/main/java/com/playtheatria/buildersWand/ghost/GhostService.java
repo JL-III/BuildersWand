@@ -7,7 +7,10 @@ import com.playtheatria.buildersWand.gesture.GestureListener;
 import com.playtheatria.buildersWand.gesture.GestureSession;
 import com.playtheatria.buildersWand.gesture.LivePlan;
 import com.playtheatria.buildersWand.wand.WandItems;
+import com.playtheatria.buildersWand.wand.PlacementUseCost;
+import com.playtheatria.buildersWand.wand.UseCounter;
 import com.playtheatria.buildersWand.wave.Feedstock;
+import com.playtheatria.buildersWand.wave.PlacementRules;
 import com.playtheatria.buildersWand.wave.Plan;
 import com.playtheatria.buildersWand.wave.WaveRunner;
 import net.kyori.adventure.text.Component;
@@ -44,8 +47,8 @@ import java.util.UUID;
  */
 public final class GhostService {
 
-    private static final String NO_MATERIAL = "Hold a placeable block in your off hand to choose the material.";
-    private static final String AIM_HINT = "Aim at a surface; RIGHT-CLICK anchors there.";
+    private static final String NO_MATERIAL = "Hold a material in your off hand.";
+    private static final String AIM_HINT = "Aim at a surface; LEFT-CLICK anchors there.";
     private static final Color UNAFFORDABLE = Color.fromRGB(0xFF, 0x2D, 0x2D); // cells you can't afford
 
     // The idle "how to use" hint shows for PULSE_SHOW of every PULSE_PERIOD ghost ticks, then
@@ -91,18 +94,38 @@ public final class GhostService {
             clearFor(player); // no wand, no permission, or suppress during the player's own wave
             return;
         }
+        if (mainHand.getAmount() != 1) {
+            clearFor(player);
+            sendPulsedHint(player, "Builders Wands cannot be used while stacked.");
+            return;
+        }
+        boolean usesBypass = player.hasPermission(WandItems.PERMISSION_USES_BYPASS);
+        UseCounter.State wandUses = wandItems.uses(mainHand);
+        if (!usesBypass && wandUses.depleted()) {
+            clearFor(player);
+            sendPulsedHint(player, "Builders Wand has no Uses remaining · /wand restore");
+            return;
+        }
         Form form = wandItems.getForm(mainHand);
         GestureSession session = gestureListener.sessionOf(player);
         boolean creative = player.getGameMode() == GameMode.CREATIVE;
         if (session == null) {
             // Un-anchored: breathe the "how to use" hint (and leave silent gaps for other
             // plugins' action-bar messages); ghost the would-be anchor cell every tick.
-            String hint = wandItems.selectedMaterial(player).isEmpty() ? NO_MATERIAL : AIM_HINT;
-            sendPulsedHint(player, form.label() + " · " + hint);
             GestureSession preview = new GestureSession();
             preview.form = form;
             Optional<Plan> plan = LivePlan.derive(player, preview, config, wandItems);
-            syncGhosts(player, plan, affordable(player, plan, creative));
+            if (waterEvaporates(plan)) {
+                sendPulsedHint(player, form.label() + " · Water evaporates in this world.");
+                clearFor(player);
+                return;
+            }
+            String hint = wandItems.selectedMaterial(player).isEmpty() ? NO_MATERIAL : AIM_HINT;
+            String uses = usesBypass ? "uses ∞" : "uses " + wandUses.remaining()
+                    + "/" + wandUses.maximum();
+            sendPulsedHint(player, form.label() + " · " + uses + " · " + hint);
+            Affordability affordable = affordability(player, plan, creative, usesBypass, wandUses);
+            syncGhosts(player, plan, affordable.cells());
             return;
         }
 
@@ -112,20 +135,40 @@ public final class GhostService {
             clearFor(player);
             return;
         }
-        int have = affordable(player, plan, creative);
-        syncGhosts(player, plan, have);
-        player.sendActionBar(actionBar(session, plan.get(), have, creative));
+        if (waterEvaporates(plan)) {
+            player.sendActionBar(Component.text("Water evaporates in this world.", NamedTextColor.RED));
+            clearFor(player);
+            return;
+        }
+        Affordability affordable = affordability(player, plan, creative, usesBypass, wandUses);
+        syncGhosts(player, plan, affordable.cells());
+        player.sendActionBar(actionBar(session, plan.get(), affordable, creative));
     }
 
-    /** Cells the player can afford of this plan's material: MAX in creative, 0 for no plan. */
-    private int affordable(Player player, Optional<Plan> plan, boolean creative) {
+    private static boolean waterEvaporates(Optional<Plan> plan) {
+        return plan.isPresent() && plan.get().material().isWater() && plan.get().world().isUltraWarm();
+    }
+
+    private record Affordability(int cells, int material, int uses, int usesPerCell,
+                                 boolean usesBypass) {
+    }
+
+    /** Material and uses affordability stay separate so the action bar names the real limit. */
+    private Affordability affordability(Player player, Optional<Plan> plan, boolean creative,
+                                        boolean usesBypass, UseCounter.State wandUses) {
         if (plan.isEmpty()) {
-            return 0;
+            return new Affordability(0, 0, usesBypass ? Integer.MAX_VALUE : wandUses.remaining(),
+                    1, usesBypass);
         }
-        if (creative) {
-            return Integer.MAX_VALUE;
-        }
-        return Feedstock.count(player.getInventory(), plan.get().material(), wandItems);
+        int material = creative || plan.get().material().reusable()
+                ? Integer.MAX_VALUE
+                : Feedstock.count(player.getInventory(), plan.get().material().sourceItem(), wandItems);
+        int uses = usesBypass ? Integer.MAX_VALUE : wandUses.remaining();
+        int usesPerCell = PlacementUseCost.perCell(plan.get().material(), config.waterUsesPerSource);
+        int cellsByUses = usesBypass
+                ? Integer.MAX_VALUE
+                : PlacementUseCost.affordableCells(uses, usesPerCell);
+        return new Affordability(Math.min(material, cellsByUses), material, uses, usesPerCell, usesBypass);
     }
 
     /**
@@ -147,13 +190,16 @@ public final class GhostService {
             return;
         }
         Plan plan = planOpt.get();
-        BlockData data = plan.blockData();
+        BlockData targetData = plan.blockData();
+        BlockData previewData = plan.material().isWater()
+                ? plan.material().previewBlock().createBlockData()
+                : targetData;
         Map<BlockVector, BlockDisplay> current = ghosts.computeIfAbsent(player.getUniqueId(), k -> new HashMap<>());
         Set<BlockVector> desired = new HashSet<>();
 
         int printableIndex = 0; // printable cells in emission order — the first `have` are affordable
         for (Location loc : plan.cells()) {
-            if (!loc.getBlock().isReplaceable()) {
+            if (!PlacementRules.isPrintable(loc.getBlock(), targetData)) {
                 continue; // occupied cell is kept at commit — show no ghost (owner feedback)
             }
             BlockVector key = new BlockVector(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
@@ -164,10 +210,10 @@ public final class GhostService {
             printableIndex++;
             BlockDisplay existing = current.get(key);
             if (existing == null || !existing.isValid()) {
-                current.put(key, spawn(player, loc, data, glow));
+                current.put(key, spawn(player, loc, previewData, glow));
             } else {
-                if (!existing.getBlock().getAsString().equals(data.getAsString())) {
-                    existing.setBlock(data); // material or rotation changed
+                if (!existing.getBlock().getAsString().equals(previewData.getAsString())) {
+                    existing.setBlock(previewData); // material or rotation changed
                 }
                 if (!glow.equals(existing.getGlowColorOverride())) {
                     existing.setGlowColorOverride(glow); // affordability changed
@@ -220,47 +266,69 @@ public final class GhostService {
 
     // ---------------------------------------------------------------- action bar (design §8.4)
 
-    private Component actionBar(GestureSession session, Plan plan, int have, boolean creative) {
+    private Component actionBar(GestureSession session, Plan plan, Affordability affordable, boolean creative) {
         Dims dims = plan.dims();
         int cells = plan.cells().size();
         int kept = 0;
         for (Location loc : plan.cells()) {
-            if (!loc.getBlock().isReplaceable()) {
+            if (!PlacementRules.isPrintable(loc.getBlock(), plan.blockData())) {
                 kept++;
             }
         }
         int printable = cells - kept;
-        String material = WandItems.materialDisplayName(plan.material());
+        String material = WandItems.materialDisplayName(plan.material().placedBlock());
 
         Component cost;
-        if (creative) {
+        if (plan.material().reusable()) {
+            cost = Component.text(material + " ×" + printable + " (bucket retained)", NamedTextColor.GREEN);
+        } else if (creative) {
             cost = Component.text(material + " ×" + printable + " (creative)", NamedTextColor.GRAY);
-        } else if (have >= printable) {
-            cost = Component.text(material + " ×" + printable + " (have " + have + ")", NamedTextColor.GREEN);
+        } else if (affordable.material() >= printable) {
+            cost = Component.text(material + " ×" + printable + " (have " + affordable.material() + ")", NamedTextColor.GREEN);
         } else {
             // Short: name the shortfall and paint it red to match the red ghost cells.
-            cost = Component.text(material + " ×" + printable + " (have " + have + ", short " + (printable - have) + ")",
+            cost = Component.text(material + " ×" + printable + " (have " + affordable.material()
+                            + ", short " + (printable - affordable.material()) + ")",
                     NamedTextColor.RED);
+        }
+        Component uses;
+        long requiredUses = PlacementUseCost.totalUses(printable, affordable.usesPerCell());
+        if (affordable.usesBypass()) {
+            uses = Component.text("uses ∞", NamedTextColor.GRAY);
+        } else if (affordable.uses() >= requiredUses) {
+            String detail = affordable.usesPerCell() == 1
+                    ? ""
+                    : " (need " + requiredUses + " · " + affordable.usesPerCell() + "/source)";
+            uses = Component.text("uses " + affordable.uses() + detail, NamedTextColor.GREEN);
+        } else {
+            long shortfall = requiredUses - affordable.uses();
+            String rate = affordable.usesPerCell() == 1
+                    ? ""
+                    : " · " + affordable.usesPerCell() + "/source";
+            uses = Component.text("uses " + affordable.uses()
+                    + " (need " + requiredUses + ", short " + shortfall + rate + ")", NamedTextColor.RED);
         }
         return Component.text(session.form.label(), NamedTextColor.GOLD)
                 .append(Component.text(" " + dims.primary() + "×" + dims.secondary() + "×" + dims.tertiary()
                         + " · " + cells + " cells, " + kept + " kept · ", NamedTextColor.GRAY))
                 .append(cost)
                 .append(Component.text(" · ", NamedTextColor.GRAY))
+                .append(uses)
+                .append(Component.text(" · ", NamedTextColor.GRAY))
                 .append(Component.text(hint(session), NamedTextColor.AQUA));
     }
 
     private static String hint(GestureSession session) {
         if (session.stage() >= session.form.lockStages()) {
-            return "RIGHT prints · LEFT cancels";
+            return "LEFT prints · RIGHT cancels";
         }
         String locks = switch (session.form) {
-            case CYLINDER, SPHERE -> "RIGHT locks radius";
-            case DIAGONAL -> "RIGHT locks width";
+            case CYLINDER, SPHERE -> "LEFT locks radius";
+            case DIAGONAL -> "LEFT locks width";
             case BOX -> session.orientation.wall()
-                    ? (session.stage() == 0 ? "RIGHT locks width" : "RIGHT locks height")
-                    : (session.stage() == 0 ? "RIGHT locks length" : "RIGHT locks width");
+                    ? (session.stage() == 0 ? "LEFT locks width" : "LEFT locks height")
+                    : (session.stage() == 0 ? "LEFT locks length" : "LEFT locks width");
         };
-        return locks + " · LEFT cancels";
+        return locks + " · RIGHT cancels";
     }
 }

@@ -18,9 +18,14 @@ dependencies {
     compileOnly("io.papermc.paper:paper-api:26.1.2.build.74-stable")
     compileOnly("com.sk89q.worldguard:worldguard-bukkit:7.0.17")
     compileOnly("com.github.Angeschossen:LandsAPI:7.25.4")
+    compileOnly("com.github.MilkBowl:VaultAPI:1.7.1") {
+        exclude group: "org.bukkit", module: "bukkit"
+    }
+    compileOnly("org.xerial:sqlite-jdbc:3.49.1.0")
     compileOnly(files("libs/logblock.jar")) // production server's jar; no public artifact exists
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("io.papermc.paper:paper-api:26.1.2.build.74-stable")
+    testImplementation("org.xerial:sqlite-jdbc:3.49.1.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

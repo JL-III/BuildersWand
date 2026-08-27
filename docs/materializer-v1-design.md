@@ -1,5 +1,10 @@
 # BuildersWand Materializer — v1 Design
 
+> **Historical frozen contract:** Later owner-approved additions add water printing, PDC
+> Uses/provenance, Denarii Use restoration, durable recognition stats, and left-click-first controls.
+> The current behavior and configuration are documented in [`README.md`](../README.md); those
+> additions supersede conflicting names, controls, and resource rules below without rewriting this record.
+
 **Status:** Frozen for implementation · 2026-08-23
 **Owner:** Jesse (JL-III) · **Target:** Paper 26.1.2, Java 21
 **Source of truth for ported rules:** the voxels-slim Materializer as shipped
