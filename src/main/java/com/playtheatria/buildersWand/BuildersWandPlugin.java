@@ -2,12 +2,15 @@ package com.playtheatria.buildersWand;
 
 import com.playtheatria.buildersWand.command.WandCommand;
 import com.playtheatria.buildersWand.command.RefillService;
+import com.playtheatria.buildersWand.command.PrefabCommandHandler;
 import com.playtheatria.buildersWand.config.PluginConfig;
 import com.playtheatria.buildersWand.economy.DenariiEconomy;
 import com.playtheatria.buildersWand.ghost.GhostService;
 import com.playtheatria.buildersWand.gesture.GestureListener;
 import com.playtheatria.buildersWand.protect.PlacementLogger;
 import com.playtheatria.buildersWand.protect.ProtectionBridge;
+import com.playtheatria.buildersWand.prefab.PrefabService;
+import com.playtheatria.buildersWand.prefab.PrefabPlacementController;
 import com.playtheatria.buildersWand.stats.BuildStatsStore;
 import com.playtheatria.buildersWand.wand.WandItems;
 import com.playtheatria.buildersWand.wave.StopReason;
@@ -26,6 +29,9 @@ public final class BuildersWandPlugin extends JavaPlugin {
     private GestureListener gestureListener;
     private GhostService ghostService;
     private RefillService refillService;
+    private PrefabService prefabService;
+    private PrefabCommandHandler prefabCommands;
+    private PrefabPlacementController prefabPlacement;
 
     @Override
     public void onEnable() {
@@ -39,15 +45,30 @@ public final class BuildersWandPlugin extends JavaPlugin {
         this.ghostService = new GhostService(this, config, wandItems, waveRunner, gestureListener);
         DenariiEconomy economy = DenariiEconomy.load(this);
         this.refillService = new RefillService(this, config, wandItems, waveRunner, economy, buildStats);
+        this.prefabService = new PrefabService(this, config.prefabSettings, wandItems);
+        this.prefabCommands = new PrefabCommandHandler(prefabService);
+        this.prefabPlacement = new PrefabPlacementController(
+                this, prefabService, config, wandItems, waveRunner);
+        this.prefabCommands.setPlacementCommands(prefabPlacement);
+        this.gestureListener.setPrefabPlacement(prefabPlacement);
+        this.ghostService.setPrefabPlacement(prefabPlacement);
         gestureListener.setGhostClearer(ghostService::clearFor);
+        prefabService.setSelectionChangedListener(player -> {
+            prefabPlacement.clearRuntime(player);
+            gestureListener.clearSession(player);
+            ghostService.clearFor(player);
+        });
 
         getServer().getPluginManager().registerEvents(gestureListener, this);
         getServer().getPluginManager().registerEvents(refillService, this);
+        getServer().getPluginManager().registerEvents(prefabService, this);
+        getServer().getPluginManager().registerEvents(prefabPlacement, this);
         PluginCommand wandCommand = getCommand("wand");
         if (wandCommand != null) {
             WandCommand executor = new WandCommand(
                     wandItems, refillService, buildStats, gestureListener::clearSession,
-                    waveRunner::hasActiveWave, getLogger());
+                    waveRunner::hasActiveWave, getLogger(), config.waterUsesPerSource,
+                    prefabCommands);
             wandCommand.setExecutor(executor);
             wandCommand.setTabCompleter(executor);
         }
@@ -65,6 +86,9 @@ public final class BuildersWandPlugin extends JavaPlugin {
         }
         if (refillService != null) {
             refillService.clearAll();
+        }
+        if (prefabService != null) {
+            prefabService.close();
         }
         if (buildStats != null) {
             buildStats.close();

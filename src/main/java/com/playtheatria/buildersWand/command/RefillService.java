@@ -21,7 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** Two-step, token-bound Denarii flow for restoring Uses on the wand in the player's main hand. */
+/** Two-step, token-bound Denarii flow for restoring Uses on the wand in the player's offhand. */
 public final class RefillService implements Listener {
 
     private record Quote(UUID playerId, String confirmationToken, String wandToken,
@@ -58,7 +58,7 @@ public final class RefillService implements Listener {
         }
         wandItems.ensureFirstWielder(wand, player);
         UseCounter.State state = wandItems.initializeUses(wand);
-        player.getInventory().setItemInMainHand(wand);
+        player.getInventory().setItemInOffHand(wand);
         int missing = state.maximum() - state.remaining();
         if (missing == 0) {
             player.sendMessage(Component.text("This Builders Wand is already full ("
@@ -97,7 +97,7 @@ public final class RefillService implements Listener {
         }
 
         String wandToken = wandItems.rotateActiveToken(wand);
-        player.getInventory().setItemInMainHand(wand);
+        player.getInventory().setItemInOffHand(wand);
         String confirmationToken = UUID.randomUUID().toString();
         long expiresAt = System.nanoTime() + config.restoreConfirmationSeconds * 1_000_000_000L;
         Quote quote = new Quote(player.getUniqueId(), confirmationToken, wandToken,
@@ -137,7 +137,7 @@ public final class RefillService implements Listener {
         if (!precheck(player)) {
             return;
         }
-        ItemStack wand = player.getInventory().getItemInMainHand();
+        ItemStack wand = player.getInventory().getItemInOffHand();
         if (!matchesQuote(wand, quote)) {
             quotes.remove(player.getUniqueId());
             player.sendMessage(Component.text("The held wand changed; request a new restoration quote.",
@@ -210,7 +210,7 @@ public final class RefillService implements Listener {
 
         boolean heldStillMatches;
         try {
-            heldStillMatches = matchesQuote(player.getInventory().getItemInMainHand(), quote);
+            heldStillMatches = matchesQuote(player.getInventory().getItemInOffHand(), quote);
         } catch (RuntimeException error) {
             plugin.getLogger().log(java.util.logging.Level.SEVERE,
                     "Could not revalidate a paid Builders Wand Use restoration for " + player.getUniqueId(), error);
@@ -222,7 +222,7 @@ public final class RefillService implements Listener {
             return;
         }
         try {
-            player.getInventory().setItemInMainHand(restored);
+            player.getInventory().setItemInOffHand(restored);
         } catch (RuntimeException error) {
             plugin.getLogger().log(java.util.logging.Level.SEVERE,
                     "Could not apply a paid Builders Wand Use restoration for " + player.getUniqueId(), error);
@@ -299,9 +299,9 @@ public final class RefillService implements Listener {
     }
 
     private ItemStack heldSingleWand(Player player) {
-        ItemStack wand = player.getInventory().getItemInMainHand();
+        ItemStack wand = player.getInventory().getItemInOffHand();
         if (!wandItems.isWand(wand)) {
-            player.sendMessage(Component.text("Hold the Builders Wand in your main hand to restore its Uses.",
+            player.sendMessage(Component.text("Put the Builders Wand in your offhand to restore its Uses.",
                     NamedTextColor.RED));
             return null;
         }
@@ -346,7 +346,7 @@ public final class RefillService implements Listener {
 
     private boolean applied(Player player, Quote quote, WandItems.RestoreReceipt receipt) {
         try {
-            ItemStack held = player.getInventory().getItemInMainHand();
+            ItemStack held = player.getInventory().getItemInOffHand();
             UseCounter.State state = wandItems.uses(held);
             return wandItems.hasActiveToken(held, quote.wandToken())
                     && state.remaining() == receipt.remainingAfter()

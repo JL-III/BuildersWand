@@ -1,101 +1,134 @@
 package com.playtheatria.buildersWand.wave;
 
+import com.playtheatria.buildersWand.wand.PrintMaterial;
 import com.playtheatria.buildersWand.wand.WandItems;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 
 import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
- * Inventory feedstock accounting (design §11). Matching is by {@link Material} only, ignoring
- * item meta, and skipping any stack carrying this plugin's wand PDC (design §5.2) — hence the
- * {@link WandItems} collaborator the spec's skip clause requires. Feedstock is spent one item
- * per placed cell as the wave runs (never reserved up front), so unspent items simply stay in
- * the inventory and there is nothing to refund on a stop.
+ * Inventory feedstock accounting. Every supported block stack in hotbar slots 0–8 contributes
+ * one protected palette sample. Backups in slots 9–35 are consumed first, followed by hotbar
+ * stack surplus, and the last sample in every participating slot is never consumed.
  */
 public final class Feedstock {
 
+    private static final int HOTBAR_SIZE = 9;
+
     /** Exact one-item removal, retained only until the corresponding block is placed. */
-    public record Receipt(ItemStack item, int storageSlot, boolean offhand) {
+    public record Receipt(ItemStack item, int storageSlot) {
+    }
+
+    /** Pure inventory projection used by the reservation policy and its unit tests. */
+    record SupplySlot(int slot, int amount) {
+        SupplySlot {
+            if (slot < 0 || amount < 1) {
+                throw new IllegalArgumentException("a supply slot needs a non-negative slot and positive amount");
+            }
+        }
     }
 
     private Feedstock() {
     }
 
-    /** Count of {@code material} across storage slots 0..35 and the off hand. */
-    public static int count(PlayerInventory inventory, Material material, WandItems wandItems) {
+    /** Available amount under the selected material's consumed-versus-retained policy. */
+    public static int available(PlayerInventory inventory, PrintMaterial material,
+                                WandItems wandItems) {
+        return material.reusable()
+                ? countAll(inventory, material.sourceItem(), wandItems)
+                : countConsumable(inventory, material.sourceItem(), wandItems);
+    }
+
+    /** Total matching items in storage. Used for reusable catalysts such as a water bucket. */
+    public static int countAll(PlayerInventory inventory, Material material, WandItems wandItems) {
+        return countAll(inventory.getStorageContents(), material, wandItems);
+    }
+
+    /**
+     * Consumable count after reserving one matching sample in each occupied hotbar slot.
+     * Stack amounts do not affect palette weight, but amounts above one remain valid feedstock.
+     */
+    public static int countConsumable(PlayerInventory inventory, Material material,
+                                      WandItems wandItems) {
+        return countConsumable(inventory.getStorageContents(), material, wandItems);
+    }
+
+    static int countAll(ItemStack[] storage, Material material, WandItems wandItems) {
+        return matchingSlots(storage, material, wandItems).stream()
+                .mapToInt(SupplySlot::amount)
+                .reduce(0, Math::addExact);
+    }
+
+    static int countConsumable(ItemStack[] storage, Material material, WandItems wandItems) {
+        return consumableCount(matchingSlots(storage, material, wandItems));
+    }
+
+    static int consumableCount(List<SupplySlot> matching) {
         int total = 0;
-        for (ItemStack stack : inventory.getStorageContents()) {
-            if (matches(stack, material, wandItems)) {
-                total += stack.getAmount();
-            }
-        }
-        ItemStack offhand = inventory.getItemInOffHand();
-        if (matches(offhand, material, wandItems)) {
-            total += offhand.getAmount();
+        for (SupplySlot supply : matching) {
+            int reserved = supply.slot() < HOTBAR_SIZE ? 1 : 0;
+            total = Math.addExact(total, Math.max(0, supply.amount() - reserved));
         }
         return total;
     }
 
+    /** Main inventory first, then a hotbar stack with surplus above its protected sample. */
+    static OptionalInt nextSpendSlot(List<SupplySlot> matching) {
+        OptionalInt mainInventory = matching.stream()
+                .filter(supply -> supply.slot() >= HOTBAR_SIZE)
+                .mapToInt(SupplySlot::slot)
+                .findFirst();
+        if (mainInventory.isPresent()) {
+            return mainInventory;
+        }
+        return matching.stream()
+                .filter(supply -> supply.slot() < HOTBAR_SIZE && supply.amount() > 1)
+                .mapToInt(SupplySlot::slot)
+                .findFirst();
+    }
+
     /**
-     * Remove one {@code material} — storage slots 0..35 first, offhand last — returning an exact
-     * receipt when one was found. Called immediately before each placement; the receipt supports
-     * lossless rollback if the world mutation itself fails.
+     * Remove one ordinary feedstock item. Main-inventory stacks are preferred; hotbar stacks may
+     * be reduced only to one. The receipt supports lossless rollback if world placement fails.
      */
     public static Optional<Receipt> spendOne(PlayerInventory inventory, Material material,
                                              WandItems wandItems) {
         ItemStack[] storage = inventory.getStorageContents();
-        for (int i = 0; i < storage.length; i++) {
-            ItemStack stack = storage[i];
-            if (matches(stack, material, wandItems)) {
-                ItemStack removed = oneOf(stack);
-                if (stack.getAmount() <= 1) {
-                    storage[i] = null;
-                } else {
-                    stack.setAmount(stack.getAmount() - 1);
-                }
-                inventory.setStorageContents(storage);
-                return Optional.of(new Receipt(removed, i, false));
-            }
+        OptionalInt selected = nextSpendSlot(matchingSlots(storage, material, wandItems));
+        if (selected.isEmpty()) {
+            return Optional.empty();
         }
-        ItemStack offhand = inventory.getItemInOffHand();
-        if (matches(offhand, material, wandItems)) {
-            ItemStack removed = oneOf(offhand);
-            if (offhand.getAmount() <= 1) {
-                inventory.setItemInOffHand(null);
-            } else {
-                offhand.setAmount(offhand.getAmount() - 1);
-                inventory.setItemInOffHand(offhand);
-            }
-            return Optional.of(new Receipt(removed, -1, true));
+        int slot = selected.getAsInt();
+        ItemStack stack = storage[slot];
+        ItemStack removed = oneOf(stack);
+        if (stack.getAmount() <= 1) {
+            storage[slot] = null;
+        } else {
+            stack.setAmount(stack.getAmount() - 1);
         }
-        return Optional.empty();
+        inventory.setStorageContents(storage);
+        return Optional.of(new Receipt(removed, slot));
     }
 
     /**
      * Restore an exact removal to its original slot when possible, then any storage slot.
-     * Returns the still-unrestored item (at most one) so the caller can drop it recoverably.
+     * Returns the still-unrestored item so the caller can drop it recoverably.
      */
     public static ItemStack restoreOne(PlayerInventory inventory, Receipt receipt) {
         ItemStack restored = receipt.item().clone();
-        if (receipt.offhand()) {
-            ItemStack current = inventory.getItemInOffHand();
-            ItemStack merged = merge(current, restored);
+        ItemStack[] storage = inventory.getStorageContents();
+        if (receipt.storageSlot() >= 0 && receipt.storageSlot() < storage.length) {
+            ItemStack merged = merge(storage[receipt.storageSlot()], restored);
             if (merged != null) {
-                inventory.setItemInOffHand(merged);
+                storage[receipt.storageSlot()] = merged;
+                inventory.setStorageContents(storage);
                 return null;
-            }
-        } else {
-            ItemStack[] storage = inventory.getStorageContents();
-            if (receipt.storageSlot() >= 0 && receipt.storageSlot() < storage.length) {
-                ItemStack merged = merge(storage[receipt.storageSlot()], restored);
-                if (merged != null) {
-                    storage[receipt.storageSlot()] = merged;
-                    inventory.setStorageContents(storage);
-                    return null;
-                }
             }
         }
         Map<Integer, ItemStack> leftovers = inventory.addItem(restored);
@@ -121,6 +154,25 @@ public final class Feedstock {
     }
 
     private static boolean matches(ItemStack stack, Material material, WandItems wandItems) {
-        return stack != null && stack.getType() == material && !wandItems.isWand(stack);
+        return stack != null && isPlainFeedstock(stack.getType(), stack.hasItemMeta(), material,
+                material == Material.STICK && wandItems.isWand(stack));
+    }
+
+    /** Pure eligibility rule shared with tests: customized items are never spent as blocks. */
+    static boolean isPlainFeedstock(Material stackMaterial, boolean hasItemMeta,
+                                    Material requestedMaterial, boolean buildersWand) {
+        return !hasItemMeta && !buildersWand && stackMaterial == requestedMaterial;
+    }
+
+    private static List<SupplySlot> matchingSlots(ItemStack[] storage, Material material,
+                                                   WandItems wandItems) {
+        List<SupplySlot> matching = new ArrayList<>();
+        for (int slot = 0; slot < storage.length; slot++) {
+            ItemStack stack = storage[slot];
+            if (matches(stack, material, wandItems)) {
+                matching.add(new SupplySlot(slot, stack.getAmount()));
+            }
+        }
+        return matching;
     }
 }

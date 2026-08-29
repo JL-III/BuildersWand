@@ -1,9 +1,10 @@
 # Implementation spec — BuildersWand Materializer v1
 
-> **Historical frozen spec:** Later owner-approved additions add water printing, PDC
-> Uses/provenance, Denarii Use restoration, durable recognition stats, and left-click-first controls. See
-> [`README.md`](../../README.md) for current behavior; those additions supersede conflicting names
-> controls, and resource rules below without silently rewriting this frozen implementation record.
+> **Historical frozen spec:** The current implementation uses an offhand Builders Wand and a
+> deterministic live hotbar palette; it does not use this spec's main-hand wand/offhand material
+> model or the later saved-swatch model. See [`README.md`](../../README.md) for current behavior and
+> configuration; it supersedes conflicting names, controls, and resource rules below without
+> silently rewriting this frozen implementation record.
 
 **Date:** 2026-08-23 · **Branch:** `feature/materializer-v1` (based on `develop2` @ 9a4a7bd)
 **Worktree:** `/Users/jesse/Development/BuildersWand-worktrees/materializer-v1`

@@ -22,7 +22,6 @@ dependencies {
         exclude group: "org.bukkit", module: "bukkit"
     }
     compileOnly("org.xerial:sqlite-jdbc:3.49.1.0")
-    compileOnly(files("libs/logblock.jar")) // production server's jar; no public artifact exists
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testImplementation("io.papermc.paper:paper-api:26.1.2.build.74-stable")
     testImplementation("org.xerial:sqlite-jdbc:3.49.1.0")

@@ -6,11 +6,11 @@ import org.bukkit.Location;
 public enum StopReason {
     BLOCK_IN_WAY("a block appeared in the way at %d, %d, %d", true),
     PERMISSION_LOST("build permission was lost at %d, %d, %d", true),
-    BODY_STUCK("a body could not be moved clear", false),
     OUT_OF_MATERIAL("you ran out of materials", false),
     OUT_OF_USES("the Builders Wand does not have enough Uses for the next placement", false),
-    WAND_REMOVED("the active Builders Wand left your main hand", false),
-    WATER_BUCKET_REMOVED("the water bucket left your off hand", false),
+    WAND_REMOVED("the active Builders Wand left your offhand", false),
+    PALETTE_CHANGED("your hotbar palette changed", false),
+    WATER_BUCKET_REMOVED("no water bucket remains in your inventory", false),
     INTERNAL_ERROR("an internal placement error stopped the print", false),
     PLAYER_QUIT("you left the game", false),
     SERVER_STOPPING("the server is stopping", false);

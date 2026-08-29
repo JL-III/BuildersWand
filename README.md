@@ -1,235 +1,292 @@
 # BuildersWand — Materializer
 
-**Player-facing instructions:** [Builders Wand Player Guide](PLAYER-GUIDE.md)
+A Paper survival-building plugin with live previews, inventory-backed textures, custom Uses,
+partial-build confirmation, and reusable WorldEdit-authored prefabs.
 
-A Paper plugin. Hold the Builders Wand, aim at a surface, and left-click to anchor one of
-four parametric forms; stretch it to size with staged left-clicks while a per-player glowing
-ghost shows exactly what will be built; the final left-click prints it cell-by-cell using
-blocks consumed from your inventory, or source water selected by a reusable water bucket —
-and spends one Use per completed solid cell or, by default, three Uses per completed water
-source. Refused and uncompleted cells spend nothing.
+- **Player guide:** [`PLAYER-GUIDE.md`](PLAYER-GUIDE.md)
+- **Prefab administrator guide:** [`docs/prefabs-admin.md`](docs/prefabs-admin.md)
+- **Shapes, limits, and prefab design contract:**
+  [`docs/2026-08-28-shapes-limits-and-prefabs-design.md`](docs/2026-08-28-shapes-limits-and-prefabs-design.md)
 
-## The four forms
+## Runtime model
 
-| Form | Shape | Dimensions | Max cells |
-|---|---|---|---|
-| **Diagonal** | a solid stair run | run 1–8 × tread width 1–5 | 40 |
-| **Box** | a hollow cuboid shell (an extent of 1–2 collapses to a solid plate) | 1–8 per axis | 296 |
-| **Cylinder** | an open tube | size 1–9 × courses 1–8 | 384 |
-| **Sphere / Capsule** | a one-cell-thick shell (length > 1 makes a capsule) | size 1–7 × length 1–8 | 490 |
+The player holds one Builders Wand in the offhand and uses the nine hotbar slots as a live material
+palette. Right-click anchors and advances a shape; the per-player ghost shows the exact plan before
+the paced wave begins. Shift-right cycles forms, left-click cancels, and shift-left rotates supported
+BlockData.
 
-Volumetric forms are **hollow by construction**. Every plan is capped at **512 expanded
-cells** (kept cells included); an over-cap request is refused, never clamped — except the
-capsule, whose live gesture walks its length down instead of vanishing. Dimension bounds and
-the 512-cap are fixed invariants, not config.
+The palette is a deterministic multiset of supported hotbar materials. Duplicate occupied slots add
+weight; stack size and slot order do not. One sample in every participating hotbar slot is protected,
+while surplus and matching inventory stacks supply placement. Recreating the same recipe at the
+same world coordinates recreates the same texture.
 
-## Using the wand
+Customized `ItemStack`s are ignored during palette capture and feedstock accounting. Names, lore,
+enchantments, custom model data, PDC, or other item metadata therefore cannot make a crate key or
+another plugin item enter the palette or be consumed as an ordinary block.
 
-1. Buy a wand from the server's priced **Essentials kit sign** (recommended default:
-   **1,000,000 Denarii**), or have an administrator issue one with `/wand give`. Then use
-   `/wand form <name>` to choose a form (or **shift + left-click** to cycle forms). The current
-   form shows in the wand's name.
-2. Hold a **placeable solid block or water bucket in your off hand**. Solid blocks cost one
-   item per placed cell (doors, beds, and shulker boxes are not allowed). A water bucket is
-   retained and acts as a reusable source for the whole water print; each source costs three
-   Uses by default.
-3. **Left-click a surface** to anchor. A purple, glowing, shrunken-block ghost tracks your
-   aim; the action bar shows the size, cell counts, material, and the next step. The ghost is
-   drawn only on cells that will actually be placed — cells already occupied by blocks (the
-   ground, an existing wall) are shown as `kept` in the action bar, not ghosted.
-4. **Left-click** to lock each stage (length / width / height, or radius), then a final
-   left-click **prints**.
-5. **Shift + right-click** rotates how oriented blocks (stairs, logs, …) are placed — it cycles
-   the four facings and the upside-down half, starting from the block's own default
-   orientation. The ghost previews the real oriented block.
-6. **Right-click cancels.** The gesture also drops if you switch hotbar slots away from the
-   wand, change the wand's form, die, or change worlds.
+Doors, beds, and block-entity materials such as chests, barrels, furnaces, hoppers, signs, and
+decorated pots are rejected from the ordinary palette. This prevents content-bearing inventory
+items from being consumed and recreated as empty default blocks.
 
-Blocks appear one per tick (one per two ticks for small prints ≤ 16 cells) with place sounds.
-Cells that are already built are **kept and never consume a use**; a print completes a partial
-shape. A living body inside the print is lifted on top. There is no undo — mine printed blocks
-to reclaim them (vanilla drops). Materials and wand uses are spent one cell at a time as the
-wave runs (never taken up front), so mid-print interruptions (a block appears, permission is
-lost, you run out of materials or uses, you move the wand, you log out) just stop the wave.
-Creative mode waives block feedstock, while only `builderswand.uses.bypass` waives wand-use
-consumption.
+Solid cells consume one matching item and one custom wand Use. A water-only palette retains its
+bucket and spends `wand.water-uses-per-source` Uses per completed source (default `3`). Water and
+solid palettes cannot mix.
 
-Water prints place level-0 source blocks in open cells. Existing source water is kept, flowing
-water is upgraded to a source, and swimmers are not pushed out of the print. Water still flows
-with vanilla physics and is refused in ultra-warm dimensions where a bucket would evaporate.
-The selecting water bucket must remain in the off hand but is never consumed, so players do not
-need to replenish it between cells or prints. Each committed water print explicitly reports its
-configured per-source and total Use cost in chat. Lava buckets are not supported.
+## Forms and density
 
-If you don't have enough material or wand uses, the cells you can't afford glow **red** in
-the preview and the action bar names each shortfall. Printing builds as many cells as both
-resources allow — in placement order — and leaves the rest. The reusable bucket has no per-cell
-inventory cost, but its planned source cells spend `wand.water-uses-per-source` Uses apiece
-(default **3**). Preview affordability divides the wand's remaining Uses by that complete
-per-source cost, so a source is never partially charged.
+| Form | Interaction | Density |
+|---|---|---|
+| **Diagonal** | Rising run plus tread width | Intrinsically solid |
+| **Box** | Three-dimensional cuboid | Shell or Solid |
+| **Cylinder** | Round cross-section plus length | Shell or Solid |
+| **Sphere / Capsule** | Round size plus optional length | Shell or Solid |
+| **Wall** | One vertical opposite-corner aim | Intrinsically solid |
+| **Line** | Dominant X, Y, or Z endpoint | Intrinsically solid |
+| **Floor** | One horizontal opposite-corner aim | Intrinsically solid |
+| **Extend Surface** | Connected exact-BlockData face | Intrinsically solid; Free, Row, or Column restriction |
 
-## Wand uses and Denarii
+`/wand density <shell|solid>` persists a preference on the wand for Box, Cylinder, and Sphere.
+`/wand surface <free|row|column>` persists the Extend Surface restriction. Both commands update an
+active compatible preview without discarding its anchor.
 
-Every newly issued Builders Wand is non-stackable and starts with **5,000 / 5,000 uses**. Remaining
-uses are stored in the wand's persistent custom data and displayed in its lore; vanilla durability
-and Essentials `/fix` do not alter them. Legacy wands without use data migrate to a full 5,000 uses
-the first time they are used or restored. A depleted wand remains at zero so its Uses can be restored.
+Preview and commit share a centralized policy for candidate cells, actual world changes, per-form
+spans, and touched chunks. An ordinary plan may inspect up to 4,096 candidate cells, but kept or
+occupied cells are removed before the default 1,024-change print limit is applied. Ordinary plans
+may touch up to 9 chunks. Prefabs keep their separate 512-cell and 8-chunk limits.
 
-The lore also shows the immutable **first wielder**. On its first real interaction, form change,
-or Use restoration, an unclaimed kit-template wand receives its own serial, first-wielder
-UUID/name snapshot, and timestamp. Minting that identity lazily prevents every copy issued by an
-Essentials kit sign from inheriting the template's serial. These fields are item provenance, not
-gameplay statistics or anti-duplication security: copying an item's NBT also copies its PDC.
+Anchored ordinary previews keep a thin gold marker with an aqua glow on the original clicked
+anchor. Signed sizing remains intentional: for example, aiming below a Box anchor can grow the Box
+downward while the marker continues to identify the original corner. If a complete operation
+crosses a scan, change, span, or chunk limit, its block ghosts are suppressed and the action bar
+uses a lightweight red boundary instead. It shows only the refusal and resize hint—never a
+misleading material or Uses quote. Right-clicking a
+refused preview changes nothing and leaves it anchored so the player can aim closer and resize it.
 
-Hold the single wand in your main hand and run `/wand restore` to quote all missing Uses, or
-`/wand restore <uses>` for an exact partial restoration. The default rate is **50 Denarii per Use**,
-with a **100-use minimum**. The quote shows the before/after uses and exact total; no money is
-taken until the player clicks **CONFIRM** (or runs `/wand restore confirm`) within 30 seconds.
-Moving to a different wand, starting a print, changing its remaining uses, or letting the quote
-expire invalidates the purchase. `/wand restore cancel` cancels it. At the defaults, empty-to-full is
-250,000 Denarii.
+## Status and partial admission
 
-The old `/wand refill` and `/wand recharge` variants remain accepted as hidden compatibility
-aliases; player-facing help, buttons, and tab completion use `restore`.
+Every ordinary form and prefab uses the same status vocabulary:
 
-The initial purchase deliberately belongs to Essentials, not this plugin: there is no
-`/wand buy` command. Set the Essentials kit sign's own price (recommended default:
-**1,000,000 Denarii**) and have the kit issue a new wand through the namespaced administrator
-command `/builderswand:wand give {player}`. Players then need the normal Essentials kit-sign/kit
-permissions plus the default-on Builders Wand use and restoration permissions. Vault and a Vault
-economy provider must be present for restoring Uses; if either is unavailable, restoration fails closed
-without taking money.
+- **green / READY** — the complete operation is affordable and legal;
+- **yellow / CAUTION or PARTIAL BUILD** — a condition needs attention or the player must explicitly
+  approve an affordable subset; and
+- **red / BLOCKED** — no placement may begin.
 
-## Build history and recognition
+Material assignment occurs before budgeting. If resources are short, the complete plan freezes,
+the exact admitted cells stay green, the remainder turns yellow, and the first commit request
+places nothing. A second bound confirmation within
+`placement.partial-confirmation-seconds` places only that quoted subset. Changed inventory, Uses,
+palette, wand, geometry, world, protection, or target state produces a fresh quote rather than a
+different silent subset.
 
-Player and server build totals use `plugins/BuildersWand/build-stats.sqlite`, not copyable wand
-PDC. This player-UUID record is the **only cumulative history**: the wand itself does not track
-lifetime Uses, restoration count, or Denarii spent. The database records completed wand Uses,
-actual non-water block mutations, actual water sources materialized, naturally completed prints,
-each player's largest completed print, and successful paid-restoration count/Uses/Denarii for
-economic tuning across every wand that player uses.
-Water that vanilla infinite-source physics fills before its scheduled cell still consumes and
-records the configured per-source Uses (three by default), but it is not falsely counted as a
-block placed by the plugin.
+Water's higher per-source Use cost is always shown as a separate yellow detail. It does not
+downgrade a fully affordable, legal water plan from green **READY** to **CAUTION**.
 
-`/wand stats` shows the player's durable all-wand totals. Per-player recognition claims have a
-unique database key, so a milestone can fire only once per player even across restarts. By default
-the server announces when a player reaches **1,000,000 actual blocks materialized**; both
-announcements and the list of block milestones are configurable. These durable player totals—not
-a tradable wand—should be used for future titles, cosmetics, leaderboard entries, or rewards.
+Ordinary admission is anchor-out. Prefab admission is bottom-to-top, then anchor-out. Already-built
+cells are kept without cost. Materials and Uses are spent only for cells that complete.
 
-Replacing a lost or damaged wand does not reset or migrate any of those totals. An administrator
-can hold the replacement in their own main hand, run `/wand setuses <uses>` to set its remaining
-balance, and then give it to the player. This command changes only the held wand's current Uses; it
-does not change maximum Uses or anyone's lifetime statistics. It refuses to run during an active
-print, cancels the administrator's pending restoration quote, and writes an audit entry to the
-server log.
-If the old wand is unavailable, its exact remaining balance cannot be derived from cumulative
-player history, so staff deliberately chooses the replacement value.
+Living entities are never pushed or teleported. Ordinary solid cells defer and retry once, then
+remain as uncharged gaps. Prefabs refuse their initial confirmation when a living entity occupies a
+solid target; an entity entering a paced wave uses the same defer/retry behavior.
 
-## Titan integration boundary
+There is no wand-level undo. Printed cells use the normal player-attributed LogBlock hook when it
+is connected.
 
-BuildersWand is intentionally standalone. Its PDC-backed **Uses** are not Titan tool Charge, and
-Power Crystals are not accepted. If those systems are unified later, the Titan Wand/item identity,
-crystal handling, and charging rules should be owned by TitanEnchants after Titan tools expose a
-stable PDC-backed service; BuildersWand should not parse or duplicate Titan's current lore rules.
+## Wand Uses and economy
+
+A new non-stackable wand starts at `wand.max-uses` (default `5,000`). Remaining and maximum Uses
+are item PDC, not vanilla durability, so Essentials `/fix` does not alter them. The item also has a
+lazy-minted serial and immutable first-wielder provenance.
+
+The initial wand purchase belongs to the server's priced Essentials kit sign; there is no
+`/wand buy` command. Use restoration is the recurring Denarii sink:
+
+```text
+/wand restore
+/wand restore <uses>
+/wand restore confirm
+/wand restore cancel
+```
+
+Quotes use `wand.refill.denarii-per-use` (default `50`), enforce
+`wand.refill.minimum-uses` (default `100`), and require confirmation before Vault withdraws money.
+The legacy `/wand refill`, `/wand recharge`, and `wand.recharge` configuration remain compatibility
+aliases, but player-facing help uses **restore** and **Uses**.
+
+Player lifetime build and restoration totals are keyed by player UUID in
+`plugins/BuildersWand/build-stats.sqlite`; they are not duplicated on tradable wand PDC.
+`/wand stats` reads those all-wand totals. `/wand setuses <uses>` changes only the administrator's
+held offhand wand and does not edit player history.
+
+## Reusable prefabs
+
+Prefabs are reusable player-global design unlocks loaded from Sponge v3 `.schem` files and strict
+flat YAML sidecars under `plugins/BuildersWand/prefabs/` by default. WorldEdit's copy offset is
+ignored. Import applies optional source rotation, trims exterior air, preserves interior air as
+clearance, and infers the lower-left-front anchor.
+
+Prefab v1 uses exact authored BlockData and exact matching inventory feedstock, not the live hotbar
+palette. It rejects unsafe content, entities, block entities, fluids, containers, and unsupported
+multi-item or multi-cell states at catalog validation.
+
+The placement state machine is:
+
+```text
+SELECTED → ANCHORED → AWAITING CONFIRMATION → PLACING
+```
+
+The first right-click fixes the anchor and an initial rotation facing the player. Shift-left or
+`/wand prefab rotate` rotates an allowed design; ordinary left-click removes the anchor while
+keeping the selection. A second right-click requests an exact quote. Every prefab—complete or
+partial—requires the opaque clickable confirmation before a wave begins.
+
+Each placement consumes exact block feedstock, normal per-cell Uses, and the metadata activation
+Uses (or `prefabs.default-activation-uses`). The unlock is never consumed. Each separately
+confirmed partial continuation pays activation Uses again. Exact authored states are kept for free;
+different non-replaceable targets and obstructed authored-air clearance fail closed.
+
+Durable unlocks live in `plugins/BuildersWand/prefab-entitlements.sqlite`. An external shop can run
+`/wand prefab grant <player> <id>`, or staff can issue a PDC Blueprint Voucher that is consumed only
+after `/wand prefab redeem` durably records the unlock. Catalog or entitlement-store failures deny
+access rather than bypassing ownership.
+
+Catalog reload is atomic: every sidecar and schematic must validate before the live generation is
+replaced. See [`docs/prefabs-admin.md`](docs/prefabs-admin.md) for the authoring format and rollout
+checklist.
 
 ## Commands
 
-- `/wand give [player]` — give a wand (self if no player). Requires `builderswand.give`.
-- `/wand form <diagonal|box|cylinder|sphere>` — set the held wand's form. Requires
-  `builderswand.use`.
-- `/wand restore [all|uses]` — quote restoring all or an exact number of Uses; does not take money.
-- `/wand restore confirm` — accept the current unexpired quote. The clickable confirmation
-  uses a one-time opaque token so an old chat button cannot approve a newer quote.
-- `/wand restore cancel` — discard the current quote.
-- `/wand` — inspect only the held wand's current state and provenance.
-- `/wand stats` — show the player's durable lifetime totals across all wands; no held wand required.
-- `/wand setuses <uses>` — set the remaining Uses on the wand held by the administrator without
-  changing global history. This is an in-game-only command requiring `builderswand.admin.setuses`.
+Player commands:
+
+- `/wand` — inspect the offhand wand and live palette
+- `/wand stats` — inspect player-global lifetime totals
+- `/wand form <diagonal|box|cylinder|sphere|wall|line|floor|extend_surface>`
+- `/wand density [shell|solid]`
+- `/wand surface [free|row|column]`
+- `/wand restore [all|uses|confirm|cancel]`
+- `/wand prefab` — list accessible designs
+- `/wand prefab <id>` — select a design
+- `/wand prefab rotate`
+- `/wand prefab confirm <opaque-token>`
+- `/wand prefab cancel`
+- `/wand prefab redeem`
+
+Administrative commands:
+
+- `/wand give [player]`
+- `/wand setuses <uses>` — changes the wand held in the administrator's offhand
+- `/wand prefab grant <player> <id>`
+- `/wand prefab revoke <player> <id>`
+- `/wand prefab voucher <online-player> <id>`
+- `/wand prefab validate <id>`
+- `/wand prefab reload`
 
 ## Permissions
 
-- `builderswand.use` — use an owned wand and `/wand form`. Default **true**; ownership of the
-  paid wand is the access gate.
-- `builderswand.give` — `/wand give`. Default **op**.
-- `builderswand.refill` — restore Uses with Denarii (stable permission name). Default **true**.
-- `builderswand.uses.bypass` — print without spending Builders Wand uses. Default **op**.
-- `builderswand.admin.setuses` — set a held wand's remaining Uses. Default **op**.
+- `builderswand.use` — use the wand and ordinary form commands; default `true`
+- `builderswand.refill` — restore Uses through Vault; default `true`
+- `builderswand.give` — issue a wand; default `op`
+- `builderswand.uses.bypass` — waive wand Use consumption; default `op`
+- `builderswand.admin.setuses` — set Uses on the administrator's held wand; default `op`
+- `builderswand.prefab.all` — access every loaded prefab; default `op`
+- `builderswand.prefab.<id>` — access one loaded prefab
+- `builderswand.prefab.admin` — grant, revoke, voucher, validate, and reload; default `op`
 
-## Configuration (`config.yml`)
+## Configuration
 
-The two monetary controls have separate authoritative homes:
-
-- **Initial wand:** the price on line four of the Essentials `[Kit]` sign; recommended default
-  **1,000,000 Denarii**. Changing the sign changes the price immediately.
-- **Use restoration:** `wand.refill.denarii-per-use` below; default **50 Denarii**. Full and partial
-  quotes are calculated from that rate, so changing it changes every restoration price after the
-  plugin is restarted. `minimum-uses` controls the smallest partial purchase.
-
-`wand.water-uses-per-source` independently controls the Use cost of each source-water cell;
-solid blocks always cost one Use. The default is **3**.
+The core shipped defaults relevant to placement and prefabs are:
 
 ```yaml
 cadence:
-  small-print-max-cells: 16     # ≤ this many printable cells → slow cadence
+  small-print-max-cells: 16
   small-print-ticks-per-cell: 2
   large-print-ticks-per-cell: 1
+
 ghost:
   update-ticks: 2
   scale: 0.8
-  glow-rgb: "9E3DFF"
+  ready-glow-rgb: "55FF55"
+  partial-glow-rgb: "FFFF55"
+  blocked-glow-rgb: "FF5555"
+
 wand:
-  # Initial purchase cost lives on the Essentials [Kit] sign.
   max-uses: 5000
   water-uses-per-source: 3
   refill:
     denarii-per-use: 50
     minimum-uses: 100
     confirmation-seconds: 30
-recognition:
-  announcements: true
-  total-block-milestones:
-    - 1000000
+
+placement:
+  partial-confirmation-seconds: 10
+
+limits:
+  max-cells-per-print: 1024
+  max-scanned-cells-per-plan: 4096
+  max-chunks-per-print: 9
+  max-span:
+    line: 64
+    wall: 32
+    floor: 32
+    box: 16
+    diagonal: { primary: 8, secondary: 5, tertiary: 1 }
+    cylinder: { primary: 9, secondary: 8, tertiary: 1 }
+    sphere: { primary: 7, secondary: 8, tertiary: 1 }
+    extend-surface: { primary: 64, secondary: 64, tertiary: 1 }
+
+prefabs:
+  enabled: true
+  directory: prefabs
+  confirmation-seconds: 30
+  default-activation-uses: 20
+  max-cells: 512
+  max-volume: 8192
+  max-axis-span: 32
+  max-chunks: 8
+  max-clearance-cells: 8192
+  require-logblock: true
+
 anchor-reach: 16
 ```
 
-Changing `max-uses` affects newly issued and not-yet-migrated legacy wands; an existing initialized
-wand keeps the maximum stored on the item. Changing `water-uses-per-source` takes effect after a
-plugin restart and does not alter actual-block recognition totals. The 512-cell cap and per-form
-dimension bounds are constants, not config.
+Changing `wand.max-uses` affects new and not-yet-migrated legacy wands; initialized wands retain
+the maximum stored on the item. All runtime configuration is loaded at plugin enable.
 
-The existing `wand.refill` configuration and `builderswand.refill` permission names remain stable
-for server compatibility; they power the player-facing `/wand restore` flow. Legacy
-`wand.recharge` configuration also remains supported.
+The initial wand price remains on the Essentials `[Kit]` sign. Prefab shop prices remain in the
+external shop; only per-placement activation Uses belong in prefab metadata/configuration.
 
-## Protection
+## Protection and logging
 
-WorldGuard and Lands are optional soft-dependencies. When present, every cell is checked for
-build permission (WorldGuard `testBuild` with bypass; the Lands block-place flag) and a print
-is refused naming the position and plugin. When absent, the plugin builds without those checks.
+WorldGuard and Lands are optional soft dependencies. When installed, target, source-validation,
+and prefab-clearance cells are checked before admission. World border, build height, chunk count,
+and entity safety are also rechecked at final confirmation.
 
-## Building & running
+LogBlock is an optional soft dependency for ordinary forms. When connected, every successful wand
+mutation is queued as the placing player's block place or replace. With the default
+`prefabs.require-logblock: true`, prefab placement is blocked before spending if that connection is
+missing or incompatible.
 
-Requires **Java 25** and targets **Paper 26.1.2** (the pinned `paper-api` artifact is a
-Java 25 build). The Gradle wrapper is 9.7.1.
+## Building and running
 
-```bash
-./gradlew build
-```
-
-Compiles the plugin and runs the geometry, material-policy, variable placement-use, custom-use,
-and SQLite-statistics unit tests. To launch a throwaway dev server for playtesting:
+Requires **Java 25** and targets **Paper 26.1.2**. The Gradle wrapper is 9.7.1.
 
 ```bash
-./gradlew runServer
+make build
 ```
 
-The first run downloads the Paper 26.1.2 dev server. Accept the Mojang EULA in `run/eula.txt`,
-`op` yourself in the console, and connect a Minecraft 26.1.2 client to `localhost:25565`. To
-exercise the protection checks, drop the WorldGuard and Lands jars into `run/plugins/`.
+This compiles the plugin and runs the unit suite. The jar is written under `build/libs/`.
 
-## Design & specification
+To launch the Paper development server:
 
-- Frozen design contract: [`docs/materializer-v1-design.md`](docs/materializer-v1-design.md)
-- Implementation spec: [`docs/specs/2026-08-23-materializer-v1.md`](docs/specs/2026-08-23-materializer-v1.md)
+```bash
+make run
+```
+
+The first run downloads the server. Accept the Mojang EULA in `run/eula.txt`, then add Vault and an
+economy provider for restoration testing. Add WorldGuard, Lands, and LogBlock jars when testing
+their integrations.
+
+## Design and specification
+
+- [`docs/materializer-v1-design.md`](docs/materializer-v1-design.md) — original frozen materializer contract
+- [`docs/specs/2026-08-23-materializer-v1.md`](docs/specs/2026-08-23-materializer-v1.md) — original implementation spec
+- [`docs/2026-08-28-shapes-limits-and-prefabs-design.md`](docs/2026-08-28-shapes-limits-and-prefabs-design.md) — implemented expansion contract

@@ -1,9 +1,10 @@
 # BuildersWand Materializer — v1 Design
 
-> **Historical frozen contract:** Later owner-approved additions add water printing, PDC
-> Uses/provenance, Denarii Use restoration, durable recognition stats, and left-click-first controls.
-> The current behavior and configuration are documented in [`README.md`](../README.md); those
-> additions supersede conflicting names, controls, and resource rules below without rewriting this record.
+> **Historical frozen contract:** The current implementation uses an offhand Builders Wand and a
+> deterministic live hotbar palette; it does not use this contract's main-hand wand/offhand material
+> model or the later saved-swatch model. Current behavior and configuration are documented in
+> [`README.md`](../README.md) and supersede conflicting names, controls, and resource rules below
+> without rewriting this record.
 
 **Status:** Frozen for implementation · 2026-08-23
 **Owner:** Jesse (JL-III) · **Target:** Paper 26.1.2, Java 21

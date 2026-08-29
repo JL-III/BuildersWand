@@ -1,12 +1,14 @@
 package com.playtheatria.buildersWand.wand;
 
+import com.playtheatria.buildersWand.form.Density;
 import com.playtheatria.buildersWand.form.Form;
+import com.playtheatria.buildersWand.form.SurfaceRestriction;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Tag;
+import org.bukkit.block.TileState;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -15,19 +17,27 @@ import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.Plugin;
 
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * Wand item identity and state via {@link PersistentDataContainer} (design §4) — the lore and
- * display name are never parsed for behavior. Also the single place the print material is read
- * from the off hand (design §5.2), so the offhand-vs-wand distinction lives with {@link #isWand}.
+ * display name are never parsed for behavior. It also captures the player's live hotbar palette.
  */
 public final class WandItems {
 
+    private static final java.util.Map<Material, Boolean> BLOCK_ENTITY_MATERIALS =
+            new ConcurrentHashMap<>();
+
     public static final String KEY_WAND = "wand";
     public static final String KEY_FORM = "form";
+    public static final String KEY_DENSITY = "density";
+    public static final String KEY_SURFACE_RESTRICTION = "surface_restriction";
     public static final String KEY_ROTATION = "rotation";
     public static final String KEY_USES = "uses";
     public static final String KEY_MAX_USES = "max_uses";
@@ -37,9 +47,8 @@ public final class WandItems {
     public static final String KEY_FIRST_WIELDER_NAME = "first_wielder_name";
     public static final String KEY_FIRST_WIELDED_AT = "first_wielded_at";
 
-    /** Shared player-facing hint for the two supported off-hand material kinds. */
-    public static final String MATERIAL_HINT =
-            "Hold a placeable block or water bucket in your off hand to choose the material.";
+    /** Short action-bar hint when the hotbar has no printable palette material. */
+    public static final String MATERIAL_HINT = "Add supported building materials to your hotbar.";
 
     /** Permission to use the wand (gesture + ghost) and {@code /wand form}. Default true. */
     public static final String PERMISSION_USE = "builderswand.use";
@@ -54,6 +63,8 @@ public final class WandItems {
 
     private final NamespacedKey wandKey;
     private final NamespacedKey formKey;
+    private final NamespacedKey densityKey;
+    private final NamespacedKey surfaceRestrictionKey;
     private final NamespacedKey rotationKey;
     private final NamespacedKey usesKey;
     private final NamespacedKey maxUsesKey;
@@ -63,6 +74,25 @@ public final class WandItems {
     private final NamespacedKey firstWielderNameKey;
     private final NamespacedKey firstWieldedAtKey;
     private final int configuredMaxUses;
+
+    /** A live hotbar capture, including a useful refusal when no palette can be formed. */
+    public record MaterialSelection(Optional<MaterialSelectionSnapshot> snapshot, String problem) {
+        public MaterialSelection {
+            snapshot = snapshot == null ? Optional.empty() : snapshot;
+            problem = problem == null ? "" : problem;
+            if (snapshot.isPresent() == !problem.isEmpty()) {
+                throw new IllegalArgumentException("a material selection has either a snapshot or a problem");
+            }
+        }
+
+        public static MaterialSelection selected(MaterialSelectionSnapshot snapshot) {
+            return new MaterialSelection(Optional.of(snapshot), "");
+        }
+
+        public static MaterialSelection refused(String problem) {
+            return new MaterialSelection(Optional.empty(), problem);
+        }
+    }
 
     /** Immutable item provenance; historical gameplay totals belong to the player, not the wand. */
     public record Identity(String wandId, String firstWielderUuid, String firstWielderName,
@@ -84,6 +114,8 @@ public final class WandItems {
     public WandItems(Plugin plugin, int configuredMaxUses) {
         this.wandKey = new NamespacedKey(plugin, KEY_WAND);
         this.formKey = new NamespacedKey(plugin, KEY_FORM);
+        this.densityKey = new NamespacedKey(plugin, KEY_DENSITY);
+        this.surfaceRestrictionKey = new NamespacedKey(plugin, KEY_SURFACE_RESTRICTION);
         this.rotationKey = new NamespacedKey(plugin, KEY_ROTATION);
         this.usesKey = new NamespacedKey(plugin, KEY_USES);
         this.maxUsesKey = new NamespacedKey(plugin, KEY_MAX_USES);
@@ -95,15 +127,23 @@ public final class WandItems {
         this.configuredMaxUses = configuredMaxUses;
     }
 
+    /** Server-wide ceiling used to reject prefab activation prices no wand can pay. */
+    public int configuredMaximumUses() {
+        return configuredMaxUses;
+    }
+
     public ItemStack createWand(Form form) {
         ItemStack item = new ItemStack(Material.STICK);
         item.editMeta(meta -> {
-            applyName(meta, form);
+            applyName(meta, form, Density.DEFAULT, SurfaceRestriction.DEFAULT);
             UseCounter.State uses = new UseCounter.State(configuredMaxUses, configuredMaxUses);
             meta.setMaxStackSize(1);
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(wandKey, PersistentDataType.BYTE, (byte) 1);
             pdc.set(formKey, PersistentDataType.STRING, form.key());
+            pdc.set(densityKey, PersistentDataType.STRING, Density.DEFAULT.key());
+            pdc.set(surfaceRestrictionKey, PersistentDataType.STRING,
+                    SurfaceRestriction.DEFAULT.key());
             pdc.set(usesKey, PersistentDataType.INTEGER, uses.remaining());
             pdc.set(maxUsesKey, PersistentDataType.INTEGER, uses.maximum());
             applyLore(meta, uses, readIdentity(pdc));
@@ -131,9 +171,14 @@ public final class WandItems {
      * hotbar name popup when the wand is selected). Display only — the PDC form remains the
      * single source of truth and is never derived from this name (design §4).
      */
-    private static void applyName(ItemMeta meta, Form form) {
+    private static void applyName(ItemMeta meta, Form form, Density density,
+                                  SurfaceRestriction restriction) {
+        String densitySuffix = form.supportsDensity() ? " · " + density.label() : "";
+        String surfaceSuffix = form == Form.EXTEND_SURFACE
+                ? " · " + restriction.label() : "";
         meta.itemName(Component.text("Builders Wand", NamedTextColor.GOLD)
-                .append(Component.text(" · " + form.label(), NamedTextColor.GRAY)));
+                .append(Component.text(" · " + form.label() + densitySuffix + surfaceSuffix,
+                        NamedTextColor.GRAY)));
     }
 
     /** Null-safe; true iff the PDC carries the wand key (design §4 — the only wand test). */
@@ -162,10 +207,66 @@ public final class WandItems {
     }
 
     public void setForm(ItemStack item, Form form) {
+        Density density = getDensity(item);
+        SurfaceRestriction restriction = getSurfaceRestriction(item);
         item.editMeta(meta -> {
             meta.getPersistentDataContainer().set(formKey, PersistentDataType.STRING, form.key());
-            applyName(meta, form);
+            applyName(meta, form, density, restriction);
         });
+    }
+
+    /** PDC density preference, defaulting to Shell for legacy wands. */
+    public Density getDensity(ItemStack item) {
+        if (item == null || item.getItemMeta() == null) {
+            return Density.DEFAULT;
+        }
+        String key = item.getItemMeta().getPersistentDataContainer()
+                .get(densityKey, PersistentDataType.STRING);
+        return Density.fromKey(key).orElse(Density.DEFAULT);
+    }
+
+    public void setDensity(ItemStack item, Density density) {
+        Form form = getForm(item);
+        SurfaceRestriction restriction = getSurfaceRestriction(item);
+        item.editMeta(meta -> {
+            meta.getPersistentDataContainer().set(densityKey, PersistentDataType.STRING, density.key());
+            applyName(meta, form, density, restriction);
+        });
+    }
+
+    /** Toggle Shell/Solid and return the persisted preference. */
+    public Density cycleDensity(ItemStack item) {
+        Density next = getDensity(item) == Density.SHELL ? Density.SOLID : Density.SHELL;
+        setDensity(item, next);
+        return next;
+    }
+
+    /** Connected-face restriction, defaulting to Free for legacy wands. */
+    public SurfaceRestriction getSurfaceRestriction(ItemStack item) {
+        if (item == null || item.getItemMeta() == null) {
+            return SurfaceRestriction.DEFAULT;
+        }
+        String key = item.getItemMeta().getPersistentDataContainer()
+                .get(surfaceRestrictionKey, PersistentDataType.STRING);
+        return SurfaceRestriction.fromKey(key).orElse(SurfaceRestriction.DEFAULT);
+    }
+
+    public void setSurfaceRestriction(ItemStack item, SurfaceRestriction restriction) {
+        Form form = getForm(item);
+        Density density = getDensity(item);
+        item.editMeta(meta -> {
+            meta.getPersistentDataContainer().set(
+                    surfaceRestrictionKey, PersistentDataType.STRING, restriction.key());
+            applyName(meta, form, density, restriction);
+        });
+    }
+
+    public SurfaceRestriction cycleSurfaceRestriction(ItemStack item) {
+        SurfaceRestriction[] values = SurfaceRestriction.values();
+        SurfaceRestriction current = getSurfaceRestriction(item);
+        SurfaceRestriction next = values[(current.ordinal() + 1) % values.length];
+        setSurfaceRestriction(item, next);
+        return next;
     }
 
     /** Placement rotation step (design: oriented placement, owner feature). Defaults to 0. */
@@ -206,12 +307,15 @@ public final class WandItems {
         if (!isWand(item) || item.getAmount() != 1) {
             return state;
         }
+        Form form = getForm(item);
+        Density density = getDensity(item);
+        SurfaceRestriction restriction = getSurfaceRestriction(item);
         item.editMeta(meta -> {
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(usesKey, PersistentDataType.INTEGER, state.remaining());
             pdc.set(maxUsesKey, PersistentDataType.INTEGER, state.maximum());
             meta.setMaxStackSize(1);
-            applyName(meta, getForm(item));
+            applyName(meta, form, density, restriction);
             applyLore(meta, state, readIdentity(pdc));
         });
         return state;
@@ -233,13 +337,15 @@ public final class WandItems {
         }
         UseCounter.State updated = replacement.get();
         Form form = getForm(item);
+        Density density = getDensity(item);
+        SurfaceRestriction restriction = getSurfaceRestriction(item);
         item.editMeta(meta -> {
             PersistentDataContainer pdc = meta.getPersistentDataContainer();
             pdc.set(usesKey, PersistentDataType.INTEGER, updated.remaining());
             pdc.set(maxUsesKey, PersistentDataType.INTEGER, updated.maximum());
             pdc.set(activeTokenKey, PersistentDataType.STRING, UUID.randomUUID().toString());
             meta.setMaxStackSize(1);
-            applyName(meta, form);
+            applyName(meta, form, density, restriction);
             applyLore(meta, updated, readIdentity(pdc));
         });
         return Optional.of(updated);
@@ -385,20 +491,85 @@ public final class WandItems {
         return String.format(Locale.US, "%,d", value);
     }
 
-    /**
-     * The print material read from the off hand: a supported solid block or water bucket.
-     * Empty when the offhand is empty, is this plugin's wand, or is not a supported selector.
-     */
-    public Optional<PrintMaterial> selectedMaterial(Player player) {
-        ItemStack offhand = player.getInventory().getItemInOffHand();
-        if (offhand.getType().isAir() || isWand(offhand)) {
-            return Optional.empty();
-        }
-        return printMaterialFor(offhand.getType());
+    /** Immutable input for one preview/plan, captured directly from all nine hotbar slots. */
+    public Optional<MaterialSelectionSnapshot> selectedMaterialSnapshot(Player player) {
+        return materialSelection(player).snapshot();
     }
 
     /**
-     * Maps the off-hand item to its print policy. A water bucket is retained and maps to a
+     * Capture a live weighted palette. Supported solid blocks participate; tools, food, and other
+     * ordinary non-block items are ignored. Water buckets form a water-only palette and may not be
+     * mixed with solid blocks. Moving samples between slots does not change the resulting recipe.
+     */
+    public MaterialSelection materialSelection(Player player) {
+        java.util.Objects.requireNonNull(player, "player");
+        List<Material> hotbar = new ArrayList<>(MaterialSelectionSnapshot.MAX_ENTRIES);
+        for (int slot = 0; slot < MaterialSelectionSnapshot.MAX_ENTRIES; slot++) {
+            ItemStack sample = player.getInventory().getItem(slot);
+            hotbar.add(paletteMaterial(sample == null ? Material.AIR : sample.getType(),
+                    sample != null && sample.hasItemMeta()));
+        }
+        return materialSelection(hotbar, WandItems::printMaterialFor, Material::isBlock);
+    }
+
+    /** Customized plugin or player items are utilities, never palette samples. */
+    static Material paletteMaterial(Material material, boolean hasItemMeta) {
+        return hasItemMeta ? Material.AIR : material;
+    }
+
+    /** Pure palette interpreter shared by production hotbar capture and unit tests. */
+    static MaterialSelection materialSelection(
+            List<Material> hotbar, Function<Material, Optional<PrintMaterial>> printPolicy,
+            Predicate<Material> blockPolicy) {
+        java.util.Objects.requireNonNull(hotbar, "hotbar");
+        java.util.Objects.requireNonNull(printPolicy, "printPolicy");
+        java.util.Objects.requireNonNull(blockPolicy, "blockPolicy");
+        if (hotbar.size() > MaterialSelectionSnapshot.MAX_ENTRIES) {
+            throw new IllegalArgumentException("a hotbar palette can contain at most nine slots");
+        }
+        List<PrintMaterial> solids = new ArrayList<>(MaterialSelectionSnapshot.MAX_ENTRIES);
+        boolean water = false;
+        for (int slot = 0; slot < hotbar.size(); slot++) {
+            Material material = hotbar.get(slot);
+            if (material == null || material == Material.AIR
+                    || material == Material.CAVE_AIR || material == Material.VOID_AIR) {
+                continue;
+            }
+            if (material == Material.WATER_BUCKET) {
+                water = true;
+                continue;
+            }
+            if (material.name().endsWith("BUCKET")) {
+                return MaterialSelection.refused("Hotbar slot " + (slot + 1) + " contains "
+                        + materialDisplayName(material) + "; only water buckets are supported.");
+            }
+            if (!blockPolicy.test(material)) {
+                continue;
+            }
+            Optional<PrintMaterial> printable = printPolicy.apply(material);
+            if (printable.isEmpty()) {
+                return MaterialSelection.refused("Hotbar slot " + (slot + 1) + " contains "
+                        + materialDisplayName(material) + ", which the Builders Wand cannot place.");
+            }
+            solids.add(printable.get());
+        }
+        if (water && !solids.isEmpty()) {
+            return MaterialSelection.refused(
+                    "Water buckets cannot be mixed with solid blocks. Use a water-only hotbar palette.");
+        }
+        if (water) {
+            return MaterialSelection.selected(
+                    MaterialSelectionSnapshot.palette(List.of(PrintMaterial.water())));
+        }
+        if (solids.isEmpty()) {
+            return MaterialSelection.refused(
+                    "Add supported building blocks to your hotbar. Water buckets work as a water-only palette.");
+        }
+        return MaterialSelection.selected(MaterialSelectionSnapshot.palette(solids));
+    }
+
+    /**
+     * Maps a captured palette entry to its print policy. A water bucket is retained and maps to a
      * level-0 water block; ordinary allowed blocks remain one-item-per-cell feedstock.
      */
     public static Optional<PrintMaterial> printMaterialFor(Material type) {
@@ -423,7 +594,26 @@ public final class WandItems {
 
     /** Multi-block or content-carrying materials excluded from printing (design §5.2). */
     public static boolean isDenylisted(Material type) {
-        return Tag.DOORS.isTagged(type) || Tag.BEDS.isTagged(type) || Tag.SHULKER_BOXES.isTagged(type);
+        String name = type.name();
+        if (name.endsWith("_DOOR") || name.endsWith("_BED")
+                || name.equals("SHULKER_BOX") || name.endsWith("_SHULKER_BOX")
+                || name.equals("CHEST") || name.endsWith("_CHEST")) {
+            return true;
+        }
+        if (!type.isBlock()) {
+            return false;
+        }
+        return BLOCK_ENTITY_MATERIALS.computeIfAbsent(type, WandItems::hasBlockEntity);
+    }
+
+    private static boolean hasBlockEntity(Material type) {
+        try {
+            return type.createBlockData().createBlockState() instanceof TileState;
+        } catch (RuntimeException unsafeBlockState) {
+            // Material selection is fail-closed: a block that cannot prove it has ordinary,
+            // stateless placement semantics must not enter a palette.
+            return true;
+        }
     }
 
     /** Player-facing material name (design §13): {@code SMOOTH_STONE} → {@code smooth stone}. */

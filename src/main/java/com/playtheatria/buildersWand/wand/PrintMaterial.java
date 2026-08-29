@@ -5,9 +5,9 @@ import org.bukkit.Material;
 import java.util.Objects;
 
 /**
- * A player's off-hand material choice, separated into the item that selects/pays for a print
- * and the block the wave actually places. Most blocks use the same material for both. A water
- * bucket is the deliberate exception: it selects source water and is a reusable catalyst.
+ * A player's selected print material, separated into the item that supplies a print and the block
+ * the wave actually places. Most blocks use the same material for both. A water bucket is the
+ * deliberate exception: it selects source water and is a reusable catalyst.
  */
 public record PrintMaterial(Material sourceItem, Material placedBlock, boolean reusable) {
 

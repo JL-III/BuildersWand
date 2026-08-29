@@ -6,7 +6,7 @@ softdepend: [WorldGuard, Lands, LogBlock, Vault]
 commands:
   wand:
     description: The Builders Wand materializer
-    usage: /wand [stats|give|form|restore|setuses] [args]
+    usage: /wand [stats|give|form|density|surface|restore|setuses|prefab] [args]
 permissions:
   builderswand.use:
     description: Use the Builders Wand and /wand form
@@ -22,4 +22,10 @@ permissions:
     default: op
   builderswand.admin.setuses:
     description: Set the remaining Uses on the Builders Wand held by the administrator
+    default: op
+  builderswand.prefab.all:
+    description: Access every loaded prefab while durable ownership is available
+    default: op
+  builderswand.prefab.admin:
+    description: Grant, revoke, issue, validate, and reload prefab designs
     default: op

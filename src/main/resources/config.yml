@@ -5,7 +5,10 @@ cadence:
 ghost:
   update-ticks: 2
   scale: 0.8
-  glow-rgb: "9E3DFF"
+  # One status vocabulary across preview blocks and player-facing text.
+  ready-glow-rgb: "55FF55"     # green: the complete build is ready
+  partial-glow-rgb: "FFFF55"   # yellow: this cell will remain after a partial build
+  blocked-glow-rgb: "FF5555"   # red: the operation cannot begin
 wand:
   # Configure the initial purchase price on the Essentials [Kit] sign that issues the wand.
   max-uses: 5000
@@ -21,4 +24,50 @@ recognition:
   # Each player is announced exactly once when their durable actual-placement total reaches a milestone.
   total-block-milestones:
     - 1000000
+placement:
+  # A partial subset must be confirmed again before this exact quote expires.
+  partial-confirmation-seconds: 10
+limits:
+  # Actual world mutations allowed in one ordinary print after kept cells are excluded.
+  max-cells-per-print: 1024
+  # Complete candidate geometry that may be inspected to discover those mutations.
+  max-scanned-cells-per-plan: 4096
+  # A 32x32 plane can touch a 3x3 chunk grid depending on where it is anchored.
+  max-chunks-per-print: 9
+  max-span:
+    line: 64
+    wall: 32
+    floor: 32
+    box: 16
+    diagonal:
+      primary: 8
+      secondary: 5
+      tertiary: 1
+    cylinder:
+      primary: 9
+      secondary: 8
+      tertiary: 1
+    sphere:
+      primary: 7
+      secondary: 8
+      tertiary: 1
+    extend-surface:
+      primary: 64
+      secondary: 64
+      tertiary: 1
+prefabs:
+  # WorldEdit-authored reusable designs live under plugins/BuildersWand/<directory>.
+  enabled: true
+  directory: prefabs
+  confirmation-seconds: 30
+  # Paid on every prefab invocation in addition to normal per-block Uses.
+  default-activation-uses: 20
+  max-cells: 512
+  # Includes authored air used as clearance; prevents oversized sparse schematics.
+  max-volume: 8192
+  max-axis-span: 32
+  max-chunks: 8
+  max-clearance-cells: 8192
+  # Prefab placement fails closed when player-attributed LogBlock logging is unavailable.
+  require-logblock: true
 anchor-reach: 16

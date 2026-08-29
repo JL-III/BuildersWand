@@ -1,14 +1,17 @@
 package com.playtheatria.buildersWand.command;
 
+import com.playtheatria.buildersWand.form.Density;
 import com.playtheatria.buildersWand.form.Form;
+import com.playtheatria.buildersWand.form.SurfaceRestriction;
 import com.playtheatria.buildersWand.stats.BuildStatsStore;
 import com.playtheatria.buildersWand.stats.PlayerBuildStats;
-import com.playtheatria.buildersWand.wand.PrintMaterial;
+import com.playtheatria.buildersWand.wand.MaterialSelectionSnapshot;
 import com.playtheatria.buildersWand.wand.UseCounter;
 import com.playtheatria.buildersWand.wand.WandItems;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
+import org.bukkit.Material;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -18,22 +21,22 @@ import org.bukkit.inventory.ItemStack;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.StringJoiner;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/**
- * {@code /wand give|form|restore|stats|setuses} plus bare {@code /wand}. Setting a form or
- * administratively changing Uses clears the target's live gesture.
- */
+/** {@code /wand give|form|restore|stats|setuses} plus bare {@code /wand}. */
 public final class WandCommand implements CommandExecutor, TabCompleter {
 
     private static final String USAGE =
-            "Usage: /wand [stats|give|form <shape>|restore [all|uses|confirm|cancel]]";
+            "Usage: /wand [stats|give|form <shape>|density <shell|solid>|surface <free|row|column>|restore|prefab]";
     private static final String SET_USES_USAGE = "Usage: /wand setuses <uses>";
     private static final List<String> FORM_KEYS =
             Arrays.stream(Form.values()).map(Form::key).toList();
@@ -44,16 +47,21 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
     private final Consumer<Player> gestureClearer;
     private final Predicate<Player> activeWave;
     private final Logger auditLogger;
+    private final int waterUsesPerSource;
+    private final PrefabCommandHandler prefabCommands;
 
     public WandCommand(WandItems wandItems, RefillService refillService, BuildStatsStore buildStats,
                        Consumer<Player> gestureClearer, Predicate<Player> activeWave,
-                       Logger auditLogger) {
+                       Logger auditLogger, int waterUsesPerSource,
+                       PrefabCommandHandler prefabCommands) {
         this.wandItems = wandItems;
         this.refillService = refillService;
         this.buildStats = buildStats;
         this.gestureClearer = gestureClearer;
         this.activeWave = activeWave;
         this.auditLogger = auditLogger;
+        this.waterUsesPerSource = waterUsesPerSource;
+        this.prefabCommands = prefabCommands;
     }
 
     @Override
@@ -64,16 +72,24 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
         return switch (args[0].toLowerCase(Locale.ROOT)) {
             case "give" -> give(sender, args);
             case "form" -> form(sender, args);
+            case "density" -> density(sender, args);
+            case "surface", "extend" -> surface(sender, args);
             case "restore", "refill", "recharge" -> restore(sender, args);
             case "stats" -> stats(sender, args);
             case "setuses" -> setUses(sender, args);
-            default -> info(sender);
+            case "prefab" -> prefabCommands.execute(
+                    sender, Arrays.copyOfRange(args, 1, args.length));
+            default -> {
+                sender.sendMessage(Component.text("Unknown wand command. " + USAGE, NamedTextColor.RED));
+                yield true;
+            }
         };
     }
 
     private boolean give(CommandSender sender, String[] args) {
         if (!sender.hasPermission(WandItems.PERMISSION_GIVE)) {
-            sender.sendMessage(Component.text("You don't have permission to use the Builders Wand.", NamedTextColor.RED));
+            sender.sendMessage(Component.text("You don't have permission to give a Builders Wand.",
+                    NamedTextColor.RED));
             return true;
         }
         Player target;
@@ -92,7 +108,8 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
         ItemStack wand = wandItems.createWand(Form.DEFAULT);
         target.getInventory().addItem(wand).values()
                 .forEach(leftover -> target.getWorld().dropItemNaturally(target.getLocation(), leftover));
-        sender.sendMessage(Component.text("Gave a Builders Wand to " + target.getName() + ".", NamedTextColor.GREEN));
+        sender.sendMessage(Component.text("Gave a Builders Wand to " + target.getName() + ".",
+                NamedTextColor.GREEN));
         return true;
     }
 
@@ -125,17 +142,17 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(Component.text("Uses cannot be negative.", NamedTextColor.RED));
             return true;
         }
-
         if (activeWave.test(player)) {
             sender.sendMessage(Component.text(
                     "Wait for your active wand print to finish before changing its Uses.",
                     NamedTextColor.RED));
             return true;
         }
-        ItemStack wand = player.getInventory().getItemInMainHand();
+
+        ItemStack wand = player.getInventory().getItemInOffHand();
         if (!wandItems.isWand(wand)) {
             sender.sendMessage(Component.text(
-                    "Hold the Builders Wand whose Uses should be changed in your main hand.",
+                    "Put the Builders Wand whose Uses should be changed in your offhand.",
                     NamedTextColor.RED));
             return true;
         }
@@ -159,21 +176,21 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
         } catch (RuntimeException error) {
             auditLogger.log(Level.SEVERE, "Could not prepare an administrative wand Uses change for "
                     + player.getUniqueId(), error);
-            sender.sendMessage(Component.text("The held wand's Uses could not be changed safely.",
+            sender.sendMessage(Component.text("The Builders Wand's Uses could not be changed safely.",
                     NamedTextColor.RED));
             return true;
         }
         if (updated.isEmpty()) {
-            sender.sendMessage(Component.text("The held wand's Uses could not be changed safely.",
+            sender.sendMessage(Component.text("The Builders Wand's Uses could not be changed safely.",
                     NamedTextColor.RED));
             return true;
         }
         try {
-            player.getInventory().setItemInMainHand(replacement);
+            player.getInventory().setItemInOffHand(replacement);
         } catch (RuntimeException error) {
             auditLogger.log(Level.SEVERE, "Could not apply an administrative wand Uses change for "
                     + player.getUniqueId(), error);
-            sender.sendMessage(Component.text("The held wand's Uses could not be changed safely.",
+            sender.sendMessage(Component.text("The Builders Wand's Uses could not be changed safely.",
                     NamedTextColor.RED));
             return true;
         }
@@ -192,7 +209,7 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
                 + (identity.wandId() == null ? "unclaimed" : identity.wandId())
                 + " uses=" + current.remaining() + "->" + state.remaining()
                 + " maximum=" + state.maximum());
-        sender.sendMessage(Component.text("Set the held Builders Wand Uses from "
+        sender.sendMessage(Component.text("Set the Builders Wand's Uses from "
                 + current.remaining() + "/" + current.maximum() + " to "
                 + state.remaining() + "/" + state.maximum()
                 + ". Lifetime stats were not changed.", NamedTextColor.GREEN));
@@ -205,11 +222,13 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
 
     private boolean form(CommandSender sender, String[] args) {
         if (!sender.hasPermission(WandItems.PERMISSION_USE)) {
-            sender.sendMessage(Component.text("You don't have permission to use the Builders Wand.", NamedTextColor.RED));
+            sender.sendMessage(Component.text("You don't have permission to use the Builders Wand.",
+                    NamedTextColor.RED));
             return true;
         }
         if (!(sender instanceof Player player)) {
-            sender.sendMessage(Component.text("Hold the Builders Wand to set its form.", NamedTextColor.RED));
+            sender.sendMessage(Component.text("Put the Builders Wand in your offhand to set its form.",
+                    NamedTextColor.RED));
             return true;
         }
         if (args.length < 2) {
@@ -221,27 +240,97 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(Component.text("Unknown form: " + args[1], NamedTextColor.RED));
             return true;
         }
-        ItemStack mainHand = player.getInventory().getItemInMainHand();
-        if (!wandItems.isWand(mainHand)) {
-            sender.sendMessage(Component.text("Hold the Builders Wand to set its form.", NamedTextColor.RED));
+        ItemStack wand = player.getInventory().getItemInOffHand();
+        if (!wandItems.isWand(wand)) {
+            sender.sendMessage(Component.text("Put the Builders Wand in your offhand to set its form.",
+                    NamedTextColor.RED));
             return true;
         }
-        if (mainHand.getAmount() != 1) {
+        if (wand.getAmount() != 1) {
             sender.sendMessage(Component.text("Separate these legacy stacked wands before changing form.",
                     NamedTextColor.RED));
             return true;
         }
-        wandItems.ensureFirstWielder(mainHand, player);
-        wandItems.setForm(mainHand, form.get());
-        player.getInventory().setItemInMainHand(mainHand);
+        wandItems.ensureFirstWielder(wand, player);
+        wandItems.setForm(wand, form.get());
+        player.getInventory().setItemInOffHand(wand);
+        prefabCommands.exitPlacement(player);
         gestureClearer.accept(player);
         sender.sendMessage(Component.text("Form set to " + form.get().key() + ".", NamedTextColor.GREEN));
         return true;
     }
 
+    private boolean density(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player) || !sender.hasPermission(WandItems.PERMISSION_USE)) {
+            sender.sendMessage(Component.text(
+                    "Put a Builders Wand in your offhand to set Shell or Solid.", NamedTextColor.RED));
+            return true;
+        }
+        ItemStack wand = player.getInventory().getItemInOffHand();
+        if (!wandItems.isWand(wand) || wand.getAmount() != 1) {
+            sender.sendMessage(Component.text(
+                    "Put one unstacked Builders Wand in your offhand.", NamedTextColor.RED));
+            return true;
+        }
+        Optional<Density> requested = args.length == 1
+                ? Optional.of(wandItems.getDensity(wand) == Density.SHELL
+                        ? Density.SOLID : Density.SHELL)
+                : args.length == 2 ? Density.fromKey(args[1]) : Optional.empty();
+        if (requested.isEmpty()) {
+            sender.sendMessage(Component.text(
+                    "Usage: /wand density <shell|solid>", NamedTextColor.RED));
+            return true;
+        }
+        wandItems.ensureFirstWielder(wand, player);
+        wandItems.setDensity(wand, requested.get());
+        player.getInventory().setItemInOffHand(wand);
+        Form form = wandItems.getForm(wand);
+        String suffix = form.supportsDensity()
+                ? " The preview now uses " + requested.get().label() + "."
+                : " It applies when Box, Cylinder, or Sphere is selected.";
+        sender.sendMessage(Component.text("Density set to " + requested.get().label() + "." + suffix,
+                NamedTextColor.GREEN));
+        return true;
+    }
+
+    private boolean surface(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player player) || !sender.hasPermission(WandItems.PERMISSION_USE)) {
+            sender.sendMessage(Component.text(
+                    "Put a Builders Wand in your offhand to set Extend Surface behavior.",
+                    NamedTextColor.RED));
+            return true;
+        }
+        ItemStack wand = player.getInventory().getItemInOffHand();
+        if (!wandItems.isWand(wand) || wand.getAmount() != 1) {
+            sender.sendMessage(Component.text(
+                    "Put one unstacked Builders Wand in your offhand.", NamedTextColor.RED));
+            return true;
+        }
+        Optional<SurfaceRestriction> requested;
+        if (args.length == 1) {
+            SurfaceRestriction[] values = SurfaceRestriction.values();
+            SurfaceRestriction current = wandItems.getSurfaceRestriction(wand);
+            requested = Optional.of(values[(current.ordinal() + 1) % values.length]);
+        } else if (args.length == 2) {
+            requested = SurfaceRestriction.fromKey(args[1]);
+        } else {
+            requested = Optional.empty();
+        }
+        if (requested.isEmpty()) {
+            sender.sendMessage(Component.text(
+                    "Usage: /wand surface <free|row|column>", NamedTextColor.RED));
+            return true;
+        }
+        wandItems.setSurfaceRestriction(wand, requested.get());
+        player.getInventory().setItemInOffHand(wand);
+        sender.sendMessage(Component.text("Extend Surface set to " + requested.get().label() + ".",
+                NamedTextColor.GREEN));
+        return true;
+    }
+
     private boolean restore(CommandSender sender, String[] args) {
         if (!(sender instanceof Player player)) {
-            sender.sendMessage(Component.text("Only a player can restore Uses on a held Builders Wand.",
+            sender.sendMessage(Component.text("Only a player can restore Builders Wand Uses.",
                     NamedTextColor.RED));
             return true;
         }
@@ -285,22 +374,30 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(Component.text(USAGE, NamedTextColor.GRAY));
             return true;
         }
-        ItemStack mainHand = player.getInventory().getItemInMainHand();
-        if (!wandItems.isWand(mainHand)) {
+        ItemStack wand = player.getInventory().getItemInOffHand();
+        if (!wandItems.isWand(wand)) {
             sender.sendMessage(Component.text(
-                    "Not holding a Builders Wand. Hold one to inspect it, or use /wand stats for your lifetime totals.",
+                    "No Builders Wand in your offhand. Equip one there, or use /wand stats for lifetime totals.",
                     NamedTextColor.GRAY));
             sender.sendMessage(Component.text(USAGE, NamedTextColor.GRAY));
             return true;
         }
-        sender.sendMessage(Component.text("Held Builders Wand", NamedTextColor.GOLD));
-        sender.sendMessage(Component.text("Form: " + wandItems.getForm(mainHand).label(), NamedTextColor.GRAY));
-        UseCounter.State uses = wandItems.initializeUses(mainHand);
-        player.getInventory().setItemInMainHand(mainHand);
+        sender.sendMessage(Component.text("Builders Wand", NamedTextColor.GOLD));
+        sender.sendMessage(Component.text("Form: " + wandItems.getForm(wand).label(), NamedTextColor.GRAY));
+        if (wandItems.getForm(wand).supportsDensity()) {
+            sender.sendMessage(Component.text("Density: " + wandItems.getDensity(wand).label(),
+                    NamedTextColor.GRAY));
+        }
+        if (wandItems.getForm(wand) == Form.EXTEND_SURFACE) {
+            sender.sendMessage(Component.text("Surface selection: "
+                    + wandItems.getSurfaceRestriction(wand).label(), NamedTextColor.GRAY));
+        }
+        UseCounter.State uses = wandItems.initializeUses(wand);
+        player.getInventory().setItemInOffHand(wand);
         String bypassSuffix = player.hasPermission(WandItems.PERMISSION_USES_BYPASS) ? " (bypassed)" : "";
         sender.sendMessage(Component.text("Uses: " + uses.remaining() + "/" + uses.maximum()
                 + bypassSuffix, uses.depleted() ? NamedTextColor.RED : NamedTextColor.GRAY));
-        WandItems.Identity identity = wandItems.identity(mainHand);
+        WandItems.Identity identity = wandItems.identity(wand);
         sender.sendMessage(Component.text("First wielded by: "
                 + (identity.firstWielderName() == null ? "Unwielded" : identity.firstWielderName()),
                 NamedTextColor.GRAY));
@@ -308,15 +405,11 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(Component.text("Wand serial: " + shortSerial(identity.wandId()),
                     NamedTextColor.DARK_GRAY));
         }
-        Optional<PrintMaterial> material = wandItems.selectedMaterial(player);
-        if (material.isPresent()) {
-            String materialSuffix = material.get().reusable() ? " (reusable bucket)" : "";
-            sender.sendMessage(Component.text("Material: "
-                    + WandItems.materialDisplayName(material.get().placedBlock()) + materialSuffix,
-                    NamedTextColor.GRAY));
-        } else {
-            sender.sendMessage(Component.text(WandItems.MATERIAL_HINT, NamedTextColor.GRAY));
-        }
+        WandItems.MaterialSelection selection = wandItems.materialSelection(player);
+        selection.snapshot().ifPresentOrElse(
+                palette -> sender.sendMessage(Component.text("Hotbar palette: ", NamedTextColor.GRAY)
+                        .append(Component.text(paletteSummary(palette), NamedTextColor.DARK_GRAY))),
+                () -> sender.sendMessage(Component.text(selection.problem(), NamedTextColor.GRAY)));
         sender.sendMessage(Component.text(USAGE, NamedTextColor.GRAY));
         return true;
     }
@@ -345,8 +438,16 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (args.length >= 2 && args[0].equalsIgnoreCase("prefab")) {
+            return prefabCommands.tabComplete(
+                    sender, Arrays.copyOfRange(args, 1, args.length));
+        }
         if (args.length == 1) {
-            List<String> roots = new ArrayList<>(List.of("give", "form", "restore", "stats"));
+            List<String> roots = new ArrayList<>(List.of(
+                    "form", "density", "surface", "restore", "stats", "prefab"));
+            if (sender.hasPermission(WandItems.PERMISSION_GIVE)) {
+                roots.add("give");
+            }
             if (sender.hasPermission(WandItems.PERMISSION_ADMIN_SET_USES)) {
                 roots.add("setuses");
             }
@@ -355,10 +456,30 @@ public final class WandCommand implements CommandExecutor, TabCompleter {
         if (args.length == 2 && args[0].equalsIgnoreCase("form")) {
             return filter(FORM_KEYS, args[1]);
         }
+        if (args.length == 2 && args[0].equalsIgnoreCase("density")) {
+            return filter(List.of("shell", "solid"), args[1]);
+        }
+        if (args.length == 2 && (args[0].equalsIgnoreCase("surface")
+                || args[0].equalsIgnoreCase("extend"))) {
+            return filter(List.of("free", "row", "column"), args[1]);
+        }
         if (args.length == 2 && args[0].equalsIgnoreCase("restore")) {
             return filter(List.of("all", "confirm", "cancel"), args[1]);
         }
         return List.of();
+    }
+
+    private String paletteSummary(MaterialSelectionSnapshot palette) {
+        if (palette.containsWater()) {
+            return "water only · bucket retained · " + waterUsesPerSource + " Uses/source";
+        }
+        List<Map.Entry<Material, Integer>> weights = new ArrayList<>(palette.weights().entrySet());
+        weights.sort(Comparator.comparing(entry -> entry.getKey().name()));
+        StringJoiner summary = new StringJoiner(" · ");
+        int total = palette.entries().size();
+        weights.forEach(entry -> summary.add(WandItems.materialDisplayName(entry.getKey())
+                + " " + entry.getValue() + "/" + total));
+        return summary.toString();
     }
 
     private static List<String> filter(List<String> options, String prefix) {

@@ -2,14 +2,16 @@ package com.playtheatria.buildersWand.wave;
 
 import com.playtheatria.buildersWand.config.PluginConfig;
 import com.playtheatria.buildersWand.form.Dims;
+import com.playtheatria.buildersWand.form.PlanDecision;
+import com.playtheatria.buildersWand.form.PlanPolicy;
 import com.playtheatria.buildersWand.protect.PlacementLogger;
 import com.playtheatria.buildersWand.protect.ProtectionBridge;
 import com.playtheatria.buildersWand.stats.BuildStatsStore;
 import com.playtheatria.buildersWand.stats.BuildStatistic;
 import com.playtheatria.buildersWand.stats.WaveStatsDelta;
 import com.playtheatria.buildersWand.utils.Err;
+import com.playtheatria.buildersWand.wand.MaterialSelectionSnapshot;
 import com.playtheatria.buildersWand.wand.PlacementUseCost;
-import com.playtheatria.buildersWand.wand.PrintMaterial;
 import com.playtheatria.buildersWand.wand.UseCounter;
 import com.playtheatria.buildersWand.wand.WandItems;
 import net.kyori.adventure.text.Component;
@@ -23,21 +25,20 @@ import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
-import org.bukkit.util.BoundingBox;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.UUID;
 
 /**
@@ -46,7 +47,40 @@ import java.util.UUID;
  */
 public final class WaveRunner {
 
-    private static final int BODY_PUSH_MAX = 12; // design §10.4
+    public enum CommitStatus {
+        STARTED_COMPLETE,
+        STARTED_PARTIAL,
+        QUOTED,
+        BLOCKED
+    }
+
+    /** Result consumed by the gesture session so a partial plan remains frozen between clicks. */
+    public record CommitResult(CommitStatus status, PlacementQuote quote, String reason,
+                               boolean adjustableRefusal) {
+        public CommitResult {
+            if (status == CommitStatus.QUOTED && quote == null) {
+                throw new IllegalArgumentException("a quoted result requires a quote");
+            }
+            reason = reason == null ? "" : reason;
+        }
+
+        static CommitResult started(boolean partial) {
+            return new CommitResult(partial ? CommitStatus.STARTED_PARTIAL
+                    : CommitStatus.STARTED_COMPLETE, null, "", false);
+        }
+
+        static CommitResult quoted(PlacementQuote quote) {
+            return new CommitResult(CommitStatus.QUOTED, quote, "", false);
+        }
+
+        static CommitResult blocked(String reason) {
+            return new CommitResult(CommitStatus.BLOCKED, null, reason, false);
+        }
+
+        static CommitResult adjustableRefusal(String reason) {
+            return new CommitResult(CommitStatus.BLOCKED, null, reason, true);
+        }
+    }
 
     private final JavaPlugin plugin;
     private final ProtectionBridge protection;
@@ -70,142 +104,511 @@ public final class WaveRunner {
 
     // ---------------------------------------------------------------- commit (design §9)
 
-    /** Runs the §9 pipeline; returns true iff a wave started (so the gesture may clear). */
-    public boolean commit(Player player, Plan plan) {
+    /**
+     * Runs the §9 pipeline. A resource-short first request returns an immutable quote and changes
+     * nothing; only an exact second request can start that quoted subset.
+     */
+    public CommitResult commit(Player player, Plan plan, PlacementQuote pendingQuote) {
         UUID id = player.getUniqueId();
 
         // 1. Busy
         Wave existing = waves.get(id);
         if (existing != null) {
-            player.sendMessage(red("A print is already running (" + existing.completed + "/" + existing.total() + ")."));
-            return false;
+            player.sendMessage(red("BLOCKED — A print is already running (" + existing.resolved()
+                    + "/" + existing.total() + ")."));
+            return CommitResult.blocked("A print is already running.");
         }
 
-        ItemStack wand = player.getInventory().getItemInMainHand();
-        if (!wandItems.isWand(wand) || wand.getAmount() != 1) {
-            player.sendMessage(red("Hold one unstacked Builders Wand in your main hand."));
-            return false;
+        if (!player.hasPermission(WandItems.PERMISSION_USE)) {
+            String reason = "BLOCKED — You no longer have permission to use the Builders Wand.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
         }
+
+        ItemStack wand = player.getInventory().getItemInOffHand();
+        if (!wandItems.isWand(wand) || wand.getAmount() != 1) {
+            player.sendMessage(red("BLOCKED — Put one unstacked Builders Wand in your offhand."));
+            return CommitResult.blocked("The Builders Wand is not ready in your offhand.");
+        }
+        wandItems.ensureFirstWielder(wand, player);
+        player.getInventory().setItemInOffHand(wand);
         boolean usesBypass = player.hasPermission(WandItems.PERMISSION_USES_BYPASS);
         UseCounter.State wandUses = wandItems.uses(wand);
-        if (!usesBypass && wandUses.depleted()) {
-            player.sendMessage(red("The Builders Wand has no Uses remaining. Restore them with /wand restore."));
-            return false;
-        }
 
-        // 2. Material (offhand is an allowed block or the reusable water-bucket catalyst)
-        ItemStack offhand = player.getInventory().getItemInOffHand();
-        Optional<PrintMaterial> selection = wandItems.selectedMaterial(player);
-        if (selection.isEmpty()) {
-            Material held = offhand.getType();
-            if (WandItems.isDenylisted(held)) {
-                player.sendMessage(red(WandItems.materialDisplayName(held)
-                        + " can't be printed (multi-block or content-carrying)."));
-            } else {
-                player.sendMessage(red(WandItems.MATERIAL_HINT));
+        // 2. Ordinary plans bind the live palette. Authored prefab plans bind their immutable
+        //    content hash and per-target feedstock through PlanOptions instead.
+        if (plan.options().livePaletteRequired()) {
+            WandItems.MaterialSelection liveSelection = wandItems.materialSelection(player);
+            Optional<MaterialSelectionSnapshot> selection = liveSelection.snapshot();
+            if (selection.isEmpty()) {
+                String reason = "BLOCKED — " + liveSelection.problem();
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
             }
-            return false;
+            if (!selection.get().equals(plan.materialSelection())) {
+                String reason = "BLOCKED — Your hotbar palette changed. Restore it or cancel this plan.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
         }
-        PrintMaterial material = selection.get();
-        if (!material.equals(plan.material())) {
-            player.sendMessage(red("Your off-hand material changed. Preview the print again."));
-            return false;
+        if (plan.materialSelection().containsWater() && plan.world().isUltraWarm()) {
+            String reason = "BLOCKED — Water evaporates in this world. Nothing changed or spent.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
         }
-        if (material.isWater() && plan.world().isUltraWarm()) {
-            player.sendMessage(red("Water evaporates in this world. Nothing changed or spent."));
-            return false;
+        if (!player.getWorld().equals(plan.world())) {
+            String reason = "BLOCKED — The frozen plan belongs to another world.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
+        }
+        Location interactionAnchor = new Location(plan.world(),
+                plan.interactionAnchor().getBlockX() + 0.5,
+                plan.interactionAnchor().getBlockY() + 0.5,
+                plan.interactionAnchor().getBlockZ() + 0.5);
+        if (player.getEyeLocation().distanceSquared(interactionAnchor)
+                > (double) config.anchorReach * config.anchorReach) {
+            String reason = "BLOCKED — Return within " + config.anchorReach
+                    + " blocks of the original anchor. Nothing changed or spent.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
+        }
+        if (plan.options().kind() == PlanOptions.Kind.ORDINARY
+                && wandItems.getForm(wand) != plan.form()) {
+            String reason = "BLOCKED — The wand mode changed. Cancel and preview the plan again.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
+        }
+        if (plan.options().kind() == PlanOptions.Kind.ORDINARY
+                && plan.form().supportsDensity()
+                && wandItems.getDensity(wand) != plan.density()) {
+            String reason = "BLOCKED — Shell/Solid changed. Cancel and preview the plan again.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
         }
 
-        // 3. Dims legal (defense in depth — the gesture already guarantees it)
-        if (Dims.validated(plan.form(), plan.dims().primary(), plan.dims().secondary(), plan.dims().tertiary()) instanceof Err) {
-            plugin.getLogger().severe("Commit received illegal dims " + plan.dims() + " for " + plan.form());
-            return false;
+        // 3. Exact geometry legality (same span/cell/chunk policy as the live preview).
+        if (plan.options().kind() == PlanOptions.Kind.ORDINARY) {
+            List<org.bukkit.util.BlockVector> exactCells = plan.targets().stream()
+                    .map(target -> new org.bukkit.util.BlockVector(
+                            target.location().getBlockX(), target.location().getBlockY(),
+                            target.location().getBlockZ()))
+                    .toList();
+            PlanDecision decision = new PlanPolicy(config.formLimits).evaluateAbsoluteCells(
+                    plan.form(), plan.dims(), plan.density(), exactCells);
+            if (!decision.allowed()) {
+                String reason = "BLOCKED — " + decision.message() + ". Nothing changed or spent.";
+                player.sendMessage(red(reason));
+                return CommitResult.adjustableRefusal(reason);
+            }
+        }
+        if (plan.options().requirePlacementLogging() && !placementLogger.available()) {
+            String reason = "BLOCKED — Prefab placement logging is unavailable ("
+                    + placementLogger.diagnostic() + "). Nothing changed or spent.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
+        }
+        for (PlanValidationCell validation : plan.options().validationCells()) {
+            String current = plan.world().getBlockAt(validation.location().getBlockX(),
+                    validation.location().getBlockY(), validation.location().getBlockZ())
+                    .getBlockData().getAsString();
+            if (!current.equals(validation.expectedBlockData())) {
+                String reason = "BLOCKED — The surface defining this plan changed at "
+                        + validation.location().getBlockX() + ", "
+                        + validation.location().getBlockY() + ", "
+                        + validation.location().getBlockZ()
+                        + ". Cancel and anchor it again.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
+        }
+        for (PlannedCell target : plan.targets()) {
+            Location location = target.location();
+            if (location.getBlockY() < plan.world().getMinHeight()
+                    || location.getBlockY() >= plan.world().getMaxHeight()) {
+                String reason = "BLOCKED — The plan crosses the world's build-height limit at "
+                        + coords(location) + ". Nothing changed or spent.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
+            if (!plan.world().getWorldBorder().isInside(location)) {
+                String reason = "BLOCKED — The plan crosses the world border at "
+                        + coords(location) + ". Nothing changed or spent.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
         }
 
-        // 4. Cells (already expanded in emission order by LivePlan)
-        List<Location> cells = plan.cells();
-
-        // 5. Protection, per cell
-        for (Location loc : cells) {
-            Optional<String> denier = protection.deniedBy(player, loc);
+        Set<Long> planChunks = new HashSet<>();
+        for (PlannedCell target : plan.targets()) {
+            planChunks.add(chunkKey(target.location()));
+        }
+        for (org.bukkit.util.BlockVector clearance : plan.options().clearanceCells()) {
+            Location location = new Location(plan.world(), clearance.getBlockX(),
+                    clearance.getBlockY(), clearance.getBlockZ());
+            if (location.getBlockY() < plan.world().getMinHeight()
+                    || location.getBlockY() >= plan.world().getMaxHeight()
+                    || !plan.world().getWorldBorder().isInside(location)) {
+                String reason = "BLOCKED — Prefab clearance leaves the safe world bounds at "
+                        + coords(location) + ". Nothing changed or spent.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
+            planChunks.add(chunkKey(location));
+            Optional<String> denier = protection.deniedBy(player, location);
             if (denier.isPresent()) {
-                player.sendMessage(red("Blocked by " + denier.get() + " at " + coords(loc) + ". Nothing changed or spent."));
-                return false;
+                String reason = "BLOCKED — " + denier.get() + " denied required prefab clearance at "
+                        + coords(location) + ". Nothing changed or spent.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
+            if (!location.getBlock().getType().isAir()) {
+                String reason = "BLOCKED — Required prefab clearance is obstructed at "
+                        + coords(location) + ". The wand never clears terrain.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
             }
         }
+        if (plan.options().prefab() && planChunks.size() > config.prefabSettings.maxChunks()) {
+            String reason = "BLOCKED — This prefab touches " + planChunks.size()
+                    + " chunks; max " + config.prefabSettings.maxChunks() + ".";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
+        }
 
-        // 6. Classify printable vs kept
-        List<Location> printable = new ArrayList<>();
+        // 4. Classify printable vs kept. Ordinary primitives preserve their established behavior:
+        //    exact matches and occupied cells are kept. Prefabs may opt into strict conflicts in
+        //    their own plan policy.
+        List<PlannedCell> printable = new ArrayList<>();
         int kept = 0;
-        for (Location loc : cells) {
-            if (PlacementRules.isPrintable(loc.getBlock(), plan.blockData())) {
-                printable.add(loc);
+        for (PlannedCell target : plan.targets()) {
+            Block block = target.location().getBlock();
+            if (PlacementRules.isAlreadyBuilt(block, target.blockData())) {
+                kept++;
+            } else if (block.isReplaceable()) {
+                printable.add(target);
+            } else if (plan.options().strictExistingStates()) {
+                String reason = "BLOCKED — A different block or block state conflicts with "
+                        + plan.options().label() + " at " + coords(target.location())
+                        + ". Nothing changed or spent.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
             } else {
                 kept++;
             }
         }
 
-        // 7. All kept
+        // The operation cap applies only to cells that would actually mutate. Kept terrain costs
+        // no block, Use, ghost, or wave work and must not make an otherwise small repair illegal.
+        if (plan.options().kind() == PlanOptions.Kind.ORDINARY) {
+            PlanDecision placementDecision = new PlanPolicy(config.formLimits)
+                    .evaluatePlacementCount(plan.form(), printable.size());
+            if (!placementDecision.allowed()) {
+                String reason = "BLOCKED — " + placementDecision.message()
+                        + ". Aim closer to reduce the shape; nothing changed or spent.";
+                player.sendMessage(red(reason));
+                return CommitResult.adjustableRefusal(reason);
+            }
+        }
+
+        // 5. Protection, only for cells that could change.
+        for (PlannedCell target : printable) {
+            Location loc = target.location();
+            Optional<String> denier = protection.deniedBy(player, loc);
+            if (denier.isPresent()) {
+                String reason = "BLOCKED — " + denier.get() + " denied this plan at "
+                        + coords(loc) + ". Nothing changed or spent.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
+        }
+
+        if (plan.options().refuseLivingEntitiesAtStart()) {
+            for (PlannedCell target : printable) {
+                if (LivingBodyCollision.blocks(target.material(), plan.world(), target.location())) {
+                    String reason = "BLOCKED — A living entity occupies the prefab at "
+                            + coords(target.location()) + ". Clear the area and confirm again.";
+                    player.sendMessage(red(reason));
+                    return CommitResult.blocked(reason);
+                }
+            }
+        }
+
+        // 6. All kept
         if (printable.isEmpty()) {
-            player.sendMessage(red("Every cell is already built. Nothing to print."));
-            return false;
+            String reason = plan.options().prefab()
+                    ? "BLOCKED — This prefab is already complete at that anchor. Nothing to print."
+                    : "BLOCKED — Every target cell is already built or occupied. Nothing to print.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
         }
 
-        int usesPerCell = PlacementUseCost.perCell(material, config.waterUsesPerSource);
-        if (!usesBypass && wandUses.remaining() < usesPerCell) {
-            player.sendMessage(red("Water placement costs " + usesPerCell
-                    + " Uses per source, but this wand has only " + wandUses.remaining() + "."));
-            return false;
-        }
-
-        // 8. (Single removed) — all forms push bodies clear mid-wave (§10.4) rather than refuse.
-
-        // 9. Ordinary feedstock is spent one item per cell while the wave runs (never reserved
-        //    up front); a reusable water bucket is retained and has no per-cell cost.
+        // 7. Simulate the complete material and Use budget in stable plan order.
         boolean creative = player.getGameMode() == GameMode.CREATIVE;
-        int need = printable.size();
+        PlacementQuote quote = quote(player, plan, printable, kept, wand, wandUses,
+                creative, usesBypass);
+
+        // A confirmation is admitted only when every bound input still produces the identical
+        // quote. If anything changed, show the replacement quote and require another click.
+        int confirmationSeconds = plan.options().alwaysConfirm()
+                ? plan.options().confirmationSeconds() : config.partialConfirmationSeconds;
+        boolean quoteTimedOut = pendingQuote != null && pendingQuote.expiredAt(
+                System.nanoTime(), confirmationSeconds);
+        if (pendingQuote != null && (quoteTimedOut || !pendingQuote.sameBinding(quote))) {
+            String expiryReason = quoteTimedOut
+                    ? "its confirmation time elapsed"
+                    : "resources, wand state, or the target changed";
+            player.sendMessage(red("BLOCKED — The previous quote expired because " + expiryReason
+                    + ". Nothing was placed."));
+            if (quote.admitted().isEmpty()) {
+                String reason = blockedShortage(quote);
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
+            if (!plan.options().alwaysConfirm()) {
+                sendQuote(player, quote, true);
+            }
+            return CommitResult.quoted(quote);
+        }
+
+        if (pendingQuote == null
+                && (plan.options().alwaysConfirm() || !quote.budget().fullyAffordable())) {
+            if (quote.admitted().isEmpty()) {
+                String reason = blockedShortage(quote);
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
+            }
+            if (!plan.options().alwaysConfirm()) {
+                sendQuote(player, quote, false);
+            }
+            return CommitResult.quoted(quote);
+        }
+
+        return startWave(player, quote, wand, wandUses);
+    }
+
+    private CommitResult startWave(Player player, PlacementQuote quote, ItemStack wand,
+                                   UseCounter.State wandUses) {
+        UUID id = player.getUniqueId();
+        List<PlannedCell> admitted = quote.admitted();
+        int need = admitted.size();
+        boolean partial = quote.partial();
 
         // Bind this wave to the exact held item only after every refusal check has passed.
         // The token is rotated here so cloned kit templates cannot share a permanent identity.
         wandItems.ensureFirstWielder(wand, player);
         String wandToken = wandItems.rotateActiveToken(wand);
-        player.getInventory().setItemInMainHand(wand);
+        player.getInventory().setItemInOffHand(wand);
         wandUses = wandItems.uses(wand);
 
-        // 10. Start the wave: chunk tickets over the plan, register, schedule
-        Set<Chunk> tickets = new HashSet<>();
-        for (Location loc : cells) {
-            Chunk chunk = loc.getChunk();
-            if (tickets.add(chunk)) {
-                chunk.addPluginChunkTicket(plugin);
+        int activationUses = quote.plan().options().activationUses();
+        WandItems.UseReceipt activationReceipt = null;
+        if (activationUses > 0) {
+            Optional<WandItems.UseReceipt> spentActivation = wandItems.spendUses(
+                    wand, wandToken, activationUses, !quote.usesBypass());
+            if (spentActivation.isEmpty()) {
+                String reason = "BLOCKED — The prefab activation Uses changed before placement. "
+                        + "Nothing was placed.";
+                player.sendMessage(red(reason));
+                return CommitResult.blocked(reason);
             }
+            activationReceipt = spentActivation.get();
+            player.getInventory().setItemInOffHand(wand);
+            wandUses = wandItems.uses(wand);
+        }
+
+        // 9. Start the wave: chunk tickets over the plan, register, schedule
+        Set<Chunk> tickets = new HashSet<>();
+        try {
+            for (PlannedCell target : admitted) {
+                Location loc = target.location();
+                Chunk chunk = loc.getChunk();
+                if (tickets.add(chunk)) {
+                    chunk.addPluginChunkTicket(plugin);
+                }
+            }
+        } catch (RuntimeException error) {
+            rollbackFailedStart(player, wand, wandToken, activationReceipt, tickets);
+            plugin.getLogger().log(java.util.logging.Level.SEVERE,
+                    "Could not start a Builders Wand wave", error);
+            String reason = "BLOCKED — The print could not start safely. Nothing was placed.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
         }
         int ticksPerCell = need <= config.smallPrintMaxCells
                 ? config.smallPrintTicksPerCell
                 : config.largePrintTicksPerCell;
-        waves.put(id, new Wave(id, player.getName(), plan.world(), material, plan.blockData(), printable,
-                ticksPerCell, tickets, creative, usesBypass, usesPerCell, wandToken));
-        ensureTask();
+        try {
+            waves.put(id, new Wave(id, player.getName(), quote.plan().world(),
+                    quote.plan().materialSelection(), quote.plan().options(), admitted,
+                    ticksPerCell, tickets, quote.creative(), quote.usesBypass(), wandToken,
+                    quote.printable().size(), activationReceipt, activationUses));
+            ensureTask();
+        } catch (RuntimeException error) {
+            waves.remove(id);
+            rollbackFailedStart(player, wand, wandToken, activationReceipt, tickets);
+            plugin.getLogger().log(java.util.logging.Level.SEVERE,
+                    "Could not register a Builders Wand wave", error);
+            String reason = "BLOCKED — The print could not start safely. Nothing was placed.";
+            player.sendMessage(red(reason));
+            return CommitResult.blocked(reason);
+        }
 
-        String usesText = usesBypass ? "uses bypassed" : wandUses.remaining() + " uses available";
-        Component startMessage = Component.text("Printing " + plan.form().key() + ": " + need
-                + " cells (" + kept + " kept); " + usesText + ".", NamedTextColor.GREEN);
-        if (material.isWater()) {
-            long plannedUses = PlacementUseCost.totalUses(need, usesPerCell);
-            String notice = usesBypass
-                    ? " Water placement normally costs " + usesPerCell + " Uses per source ("
+        String usesText = quote.usesBypass() ? "Uses bypassed" : wandUses.remaining() + " Uses available";
+        NamedTextColor statusColor = partial ? NamedTextColor.YELLOW : NamedTextColor.GREEN;
+        String status = partial ? "PARTIAL BUILD" : "READY";
+        Component startMessage = Component.text(status + " — Printing " + quote.plan().options().label() + ": "
+                + need + (partial ? " / " + quote.printable().size() : "") + " cells ("
+                + quote.kept() + " kept); " + usesText + ".", statusColor);
+        long waterCells = admitted.stream().filter(target -> target.material().isWater()).count();
+        if (waterCells > 0) {
+            long plannedUses = PlacementUseCost.totalUses((int) waterCells, config.waterUsesPerSource);
+            String notice = quote.usesBypass()
+                    ? " Water placement normally costs " + config.waterUsesPerSource + " Uses per source ("
                             + "up to " + plannedUses + " Uses for this print); your Uses are bypassed."
-                    : " Water placement costs " + usesPerCell + " Uses per source ("
+                    : " Water placement costs " + config.waterUsesPerSource + " Uses per source ("
                             + "up to " + plannedUses + " Uses for this print).";
-            startMessage = startMessage.append(Component.text(notice, NamedTextColor.GOLD));
+            startMessage = startMessage.append(Component.text(notice, NamedTextColor.YELLOW));
         }
         player.sendMessage(startMessage);
-        return true;
+        return CommitResult.started(partial);
+    }
+
+    private void rollbackFailedStart(Player player, ItemStack wand, String wandToken,
+                                     WandItems.UseReceipt activationReceipt,
+                                     Set<Chunk> tickets) {
+        for (Chunk chunk : tickets) {
+            try {
+                chunk.removePluginChunkTicket(plugin);
+            } catch (RuntimeException error) {
+                plugin.getLogger().log(java.util.logging.Level.SEVERE,
+                        "Could not remove a chunk ticket after a failed wave start", error);
+            }
+        }
+        if (activationReceipt == null) {
+            return;
+        }
+        try {
+            if (wandItems.restoreUse(wand, wandToken, activationReceipt)) {
+                player.getInventory().setItemInOffHand(wand);
+            } else {
+                plugin.getLogger().severe("Could not restore prefab activation Uses after a failed "
+                        + "wave start for " + player.getUniqueId());
+            }
+        } catch (RuntimeException error) {
+            plugin.getLogger().log(java.util.logging.Level.SEVERE,
+                    "Could not restore prefab activation Uses after a failed wave start for "
+                            + player.getUniqueId(), error);
+        }
     }
 
     /** Whether this player has a wave printing right now (ghosts are suppressed while so). */
     public boolean hasActiveWave(Player player) {
         return waves.containsKey(player.getUniqueId());
+    }
+
+    /** Read-only hard preflight shared by live ghost status and the final commit path. */
+    public Optional<String> previewHardFailure(Player player, Plan plan) {
+        if (!player.getWorld().equals(plan.world())) {
+            return Optional.of("the plan belongs to another world");
+        }
+        Location anchor = new Location(plan.world(), plan.interactionAnchor().getBlockX() + 0.5,
+                plan.interactionAnchor().getBlockY() + 0.5,
+                plan.interactionAnchor().getBlockZ() + 0.5);
+        if (player.getEyeLocation().distanceSquared(anchor)
+                > (double) config.anchorReach * config.anchorReach) {
+            return Optional.of("return within " + config.anchorReach + " blocks of the anchor");
+        }
+        if (plan.options().kind() == PlanOptions.Kind.ORDINARY) {
+            List<org.bukkit.util.BlockVector> exact = plan.targets().stream()
+                    .map(target -> new org.bukkit.util.BlockVector(target.location().getBlockX(),
+                            target.location().getBlockY(), target.location().getBlockZ()))
+                    .toList();
+            PlanDecision decision = new PlanPolicy(config.formLimits).evaluateAbsoluteCells(
+                    plan.form(), plan.dims(), plan.density(), exact);
+            if (!decision.allowed()) {
+                return Optional.of(decision.message());
+            }
+        }
+        if (plan.options().requirePlacementLogging() && !placementLogger.available()) {
+            return Optional.of("placement logging is unavailable: " + placementLogger.diagnostic());
+        }
+        for (PlanValidationCell validation : plan.options().validationCells()) {
+            String current = plan.world().getBlockAt(validation.location().getBlockX(),
+                    validation.location().getBlockY(), validation.location().getBlockZ())
+                    .getBlockData().getAsString();
+            if (!current.equals(validation.expectedBlockData())) {
+                return Optional.of("the source surface changed; cancel and anchor it again");
+            }
+        }
+        Set<Long> chunks = new HashSet<>();
+        List<PlannedCell> printableTargets = new ArrayList<>();
+        for (PlannedCell target : plan.targets()) {
+            Location location = target.location();
+            if (location.getBlockY() < plan.world().getMinHeight()
+                    || location.getBlockY() >= plan.world().getMaxHeight()) {
+                return Optional.of("the plan crosses build height at " + coords(location));
+            }
+            if (!plan.world().getWorldBorder().isInside(location)) {
+                return Optional.of("the plan crosses the world border at " + coords(location));
+            }
+            chunks.add(chunkKey(location));
+            Block block = location.getBlock();
+            boolean alreadyBuilt = PlacementRules.isAlreadyBuilt(block, target.blockData());
+            if (plan.options().strictExistingStates()
+                    && !alreadyBuilt && !block.isReplaceable()) {
+                return Optional.of("a different block conflicts at " + coords(location));
+            }
+            boolean isPrintable = !alreadyBuilt && block.isReplaceable();
+            if (!isPrintable) {
+                continue;
+            }
+            printableTargets.add(target);
+        }
+        if (plan.options().kind() == PlanOptions.Kind.ORDINARY) {
+            PlanDecision placementDecision = new PlanPolicy(config.formLimits)
+                    .evaluatePlacementCount(plan.form(), printableTargets.size());
+            if (!placementDecision.allowed()) {
+                return Optional.of(placementDecision.message());
+            }
+        }
+        // Protection and entity queries are intentionally after the cheap mutation cap. An
+        // oversized ordinary plan is already inadmissible and must not fan out into thousands of
+        // external region checks every time its preview refreshes.
+        for (PlannedCell target : printableTargets) {
+            Location location = target.location();
+            Optional<String> denier = protection.deniedBy(player, location);
+            if (denier.isPresent()) {
+                return Optional.of(denier.get() + " denies " + coords(location));
+            }
+            if (plan.options().refuseLivingEntitiesAtStart()
+                    && LivingBodyCollision.blocks(target.material(), plan.world(), location)) {
+                return Optional.of("a living entity occupies " + coords(location));
+            }
+        }
+        for (org.bukkit.util.BlockVector cell : plan.options().clearanceCells()) {
+            Location location = new Location(plan.world(), cell.getBlockX(), cell.getBlockY(),
+                    cell.getBlockZ());
+            if (location.getBlockY() < plan.world().getMinHeight()
+                    || location.getBlockY() >= plan.world().getMaxHeight()
+                    || !plan.world().getWorldBorder().isInside(location)) {
+                return Optional.of("required clearance leaves safe world bounds at "
+                        + coords(location));
+            }
+            Optional<String> denier = protection.deniedBy(player, location);
+            if (denier.isPresent()) {
+                return Optional.of(denier.get() + " denies required clearance at "
+                        + coords(location));
+            }
+            if (!location.getBlock().getType().isAir()) {
+                return Optional.of("required clearance is obstructed at " + coords(location));
+            }
+            chunks.add(chunkKey(location));
+        }
+        if (plan.options().prefab() && chunks.size() > config.prefabSettings.maxChunks()) {
+            return Optional.of("the prefab touches " + chunks.size() + " chunks; max "
+                    + config.prefabSettings.maxChunks());
+        }
+        return Optional.empty();
     }
 
     // ---------------------------------------------------------------- tick (design §10.3)
@@ -240,37 +643,55 @@ public final class WaveRunner {
             return;
         }
 
-        Location loc = wave.printable.get(wave.completed);
+        PlannedCell target = wave.placements.current();
+        Location loc = target.location();
         Block block = loc.getBlock();
+        int usesPerCell = PlacementUseCost.perCell(target.material(), config.waterUsesPerSource);
 
         // 1. Protection re-check (stops before spending — nothing is lost)
+        if (!player.hasPermission(WandItems.PERMISSION_USE)) {
+            stop(wave, player, StopReason.PERMISSION_LOST, loc);
+            return;
+        }
+        if (wave.options.requirePlacementLogging() && !placementLogger.available()) {
+            plugin.getLogger().severe("Required placement logging became unavailable before "
+                    + coords(loc) + ": " + placementLogger.diagnostic());
+            stop(wave, player, StopReason.INTERNAL_ERROR, null);
+            return;
+        }
         if (!protection.canBuild(player, loc)) {
             stop(wave, player, StopReason.PERMISSION_LOST, loc);
             return;
         }
-        ItemStack activeWand = player.getInventory().getItemInMainHand();
+        ItemStack activeWand = player.getInventory().getItemInOffHand();
         if (!wandItems.hasActiveToken(activeWand, wave.wandToken)) {
             stop(wave, player, StopReason.WAND_REMOVED, null);
             return;
         }
-        if (!wave.usesBypass && wandItems.uses(activeWand).remaining() < wave.usesPerCell) {
+        if (wave.options.livePaletteRequired() && wandItems.materialSelection(player).snapshot()
+                .filter(wave.materialSelection::equals).isEmpty()) {
+            stop(wave, player, StopReason.PALETTE_CHANGED, null);
+            return;
+        }
+        if (!wave.usesBypass && wandItems.uses(activeWand).remaining() < usesPerCell) {
             stop(wave, player, StopReason.OUT_OF_USES, null);
             return;
         }
-        if (wave.material.reusable()
-                && wandItems.selectedMaterial(player).filter(wave.material::equals).isEmpty()) {
+        if (target.material().reusable()
+                && Feedstock.countAll(player.getInventory(), target.material().sourceItem(), wandItems) == 0) {
             stop(wave, player, StopReason.WATER_BUCKET_REMOVED, null);
             return;
         }
         // A prior placement can turn a later planned water cell into a source through vanilla
-        // infinite-source physics. It is complete now; avoid logging and sounding a no-op.
-        if (wave.material.isWater() && PlacementRules.isAlreadyBuilt(block, wave.blockData)) {
-            Optional<WandItems.UseReceipt> use = spendUses(wave, player, activeWand);
+        // infinite-source physics. It completed as part of the quoted plan, so retain the planned
+        // Use charge while avoiding a duplicate placement, log entry, or sound.
+        if (target.material().isWater() && PlacementRules.isAlreadyBuilt(block, target.blockData())) {
+            Optional<WandItems.UseReceipt> use = spendUses(wave, player, activeWand, usesPerCell);
             if (use.isEmpty()) {
                 stop(wave, player, StopReason.OUT_OF_USES, null);
                 return;
             }
-            completeCell(wave, player, false);
+            completeCell(wave, player, target, usesPerCell, false);
             return;
         }
         // 2. No longer replaceable
@@ -278,9 +699,17 @@ public final class WaveRunner {
             stop(wave, player, StopReason.BLOCK_IN_WAY, loc);
             return;
         }
-        // 3. Push living entities clear
-        if (!wave.material.isWater() && !pushBodies(wave, loc)) {
-            stop(wave, player, StopReason.BODY_STUCK, loc);
+        // 3. A living body gets one deferred retry after the primary pass. If it still occupies
+        //    the cell then, leave a gap. Neither outcome spends a resource or moves the entity.
+        if (LivingBodyCollision.blocks(target.material(), wave.world, loc)) {
+            DeferredPlacementQueue.ObstructionResult result = wave.placements.obstructCurrent();
+            if (result == DeferredPlacementQueue.ObstructionResult.DEFERRED
+                    && wave.placements.deferred() == 1) {
+                player.sendMessage(Component.text(
+                        "A living body blocked a cell. Occupied cells will be retried once at the end.",
+                        NamedTextColor.YELLOW));
+            }
+            settleIfResolved(wave, player);
             return;
         }
         // Capture the world rollback point before either resource is spent.
@@ -289,13 +718,14 @@ public final class WaveRunner {
         // 4. Precheck both resources, then mutate them synchronously. Uses are written first
         //    because it has an exact-token rollback; an ordinary material is only removed after
         //    the precheck makes that removal deterministic on the server thread.
-        boolean spendsFeedstock = !wave.creative && !wave.material.reusable();
+        boolean spendsFeedstock = !wave.creative && !target.material().reusable();
         if (spendsFeedstock
-                && Feedstock.count(player.getInventory(), wave.material.sourceItem(), wandItems) == 0) {
+                && Feedstock.countConsumable(
+                        player.getInventory(), target.material().sourceItem(), wandItems) == 0) {
             stop(wave, player, StopReason.OUT_OF_MATERIAL, null);
             return;
         }
-        Optional<WandItems.UseReceipt> spentUse = spendUses(wave, player, activeWand);
+        Optional<WandItems.UseReceipt> spentUse = spendUses(wave, player, activeWand, usesPerCell);
         if (spentUse.isEmpty()) {
             stop(wave, player, StopReason.OUT_OF_USES, null);
             return;
@@ -303,7 +733,7 @@ public final class WaveRunner {
         Feedstock.Receipt feedstockReceipt = null;
         if (spendsFeedstock) {
             Optional<Feedstock.Receipt> spent = Feedstock.spendOne(
-                    player.getInventory(), wave.material.sourceItem(), wandItems);
+                    player.getInventory(), target.material().sourceItem(), wandItems);
             if (spent.isEmpty()) {
                 restoreUse(wave, player, spentUse.get());
                 stop(wave, player, StopReason.OUT_OF_MATERIAL, null);
@@ -312,17 +742,22 @@ public final class WaveRunner {
             feedstockReceipt = spent.get();
         }
 
-        // 5. Place with physics. If the server throws, inspect the postcondition: a target block
-        //    keeps its resource spend; otherwise restore the prior state and both exact debits.
+        // 5. Place with physics, then require the exact authored state to have survived immediate
+        //    physics. A thrown mutation may still have completed, so both paths share the same
+        //    postcondition-aware rollback handler.
         try {
-            block.setBlockData(wave.blockData, true);
+            block.setBlockData(target.blockData(), true);
+            if (!PlacementRules.isAlreadyBuilt(block, target.blockData())) {
+                throw new IllegalStateException(
+                        "The server did not retain the exact requested block state");
+            }
         } catch (RuntimeException error) {
-            handlePlacementFailure(wave, player, block, before,
+            handlePlacementFailure(wave, player, target, block, before, usesPerCell,
                     spentUse.get(), feedstockReceipt, error);
             return;
         }
         try {
-            if (wave.material.isWater()) {
+            if (target.material().isWater()) {
                 wave.world.playSound(loc, Sound.ITEM_BUCKET_EMPTY, SoundCategory.BLOCKS, 1.0f, 1.0f);
             } else {
                 wave.world.playSound(loc, block.getBlockSoundGroup().getPlaceSound(), 1.0f, 1.0f);
@@ -336,23 +771,30 @@ public final class WaveRunner {
         } catch (RuntimeException error) {
             plugin.getLogger().log(java.util.logging.Level.SEVERE,
                     "Builders Wand placed a block but could not log it at " + coords(loc), error);
-            completeCell(wave, player, true);
+            completeCell(wave, player, target, usesPerCell, true);
             if (waves.get(wave.owner) == wave) {
                 stop(wave, player, StopReason.INTERNAL_ERROR, null);
             }
             return;
         }
         // 6. Account
-        completeCell(wave, player, true);
+        completeCell(wave, player, target, usesPerCell, true);
     }
 
-    private void handlePlacementFailure(Wave wave, Player player, Block block, BlockState before,
+    private void handlePlacementFailure(Wave wave, Player player, PlannedCell target,
+                                        Block block, BlockState before, int usesPerCell,
                                         WandItems.UseReceipt useReceipt,
                                         Feedstock.Receipt feedstockReceipt,
                                         RuntimeException error) {
+        boolean targetPresent = false;
+        try {
+            targetPresent = PlacementRules.isAlreadyBuilt(block, target.blockData());
+        } catch (RuntimeException inspectionError) {
+            error.addSuppressed(inspectionError);
+        }
         plugin.getLogger().log(java.util.logging.Level.SEVERE,
-                "Builders Wand placement threw at " + coords(block.getLocation()), error);
-        if (PlacementRules.isAlreadyBuilt(block, wave.blockData)) {
+                "Builders Wand placement failed at " + coords(block.getLocation()), error);
+        if (targetPresent) {
             try {
                 placementLogger.logPlacement(player, before, block.getState());
             } catch (RuntimeException logError) {
@@ -360,7 +802,7 @@ public final class WaveRunner {
                         "Builders Wand could not log a placement that completed while throwing at "
                                 + coords(block.getLocation()), logError);
             }
-            completeCell(wave, player, true);
+            completeCell(wave, player, target, usesPerCell, true);
             if (waves.get(wave.owner) == wave) {
                 stop(wave, player, StopReason.INTERNAL_ERROR, null);
             }
@@ -387,20 +829,21 @@ public final class WaveRunner {
         stop(wave, player, StopReason.INTERNAL_ERROR, null);
     }
 
-    private Optional<WandItems.UseReceipt> spendUses(Wave wave, Player player, ItemStack activeWand) {
+    private Optional<WandItems.UseReceipt> spendUses(Wave wave, Player player, ItemStack activeWand,
+                                                     int usesPerCell) {
         Optional<WandItems.UseReceipt> receipt = wandItems.spendUses(
-                activeWand, wave.wandToken, wave.usesPerCell, !wave.usesBypass);
+                activeWand, wave.wandToken, usesPerCell, !wave.usesBypass);
         if (receipt.isEmpty()) {
             return Optional.empty();
         }
-        player.getInventory().setItemInMainHand(activeWand);
+        player.getInventory().setItemInOffHand(activeWand);
         return receipt;
     }
 
     private void restoreUse(Wave wave, Player player, WandItems.UseReceipt receipt) {
-        ItemStack mainHand = player.getInventory().getItemInMainHand();
-        if (wandItems.restoreUse(mainHand, wave.wandToken, receipt)) {
-            player.getInventory().setItemInMainHand(mainHand);
+        ItemStack offhand = player.getInventory().getItemInOffHand();
+        if (wandItems.restoreUse(offhand, wave.wandToken, receipt)) {
+            player.getInventory().setItemInOffHand(offhand);
             return;
         }
         ItemStack[] storage = player.getInventory().getStorageContents();
@@ -410,78 +853,28 @@ public final class WaveRunner {
                 return;
             }
         }
-        ItemStack offhand = player.getInventory().getItemInOffHand();
-        if (wandItems.restoreUse(offhand, wave.wandToken, receipt)) {
-            player.getInventory().setItemInOffHand(offhand);
-            return;
-        }
         plugin.getLogger().severe("Could not restore wand uses after a failed resource or placement update for "
                 + player.getUniqueId());
     }
 
-    private void completeCell(Wave wave, Player player, boolean actuallyPlaced) {
-        wave.usesSpent += wave.usesPerCell;
+    private void completeCell(Wave wave, Player player, PlannedCell target, int usesPerCell,
+                              boolean actuallyPlaced) {
+        wave.usesSpent += usesPerCell;
         if (actuallyPlaced) {
-            if (wave.material.isWater()) {
+            if (target.material().isWater()) {
                 wave.actualWaterCells++;
             } else {
                 wave.actualBlocksPlaced++;
             }
         }
-        wave.completed++;
-        if (wave.completed >= wave.total()) {
+        wave.placements.completeCurrent();
+        settleIfResolved(wave, player);
+    }
+
+    private void settleIfResolved(Wave wave, Player player) {
+        if (wave.placements.isComplete()) {
             settle(wave, player);
         }
-    }
-
-    // ---------------------------------------------------------------- body push (design §10.4)
-
-    private boolean pushBodies(Wave wave, Location cell) {
-        BoundingBox cellBox = new BoundingBox(
-                cell.getBlockX(), cell.getBlockY(), cell.getBlockZ(),
-                cell.getBlockX() + 1, cell.getBlockY() + 1, cell.getBlockZ() + 1);
-        List<Entity> bodies = new ArrayList<>(
-                wave.world.getNearbyEntities(cellBox, e -> e instanceof LivingEntity));
-        if (bodies.isEmpty()) {
-            return true;
-        }
-        Set<Long> unplaced = unplacedKeys(wave);
-        for (Entity entity : bodies) {
-            if (!pushOne(wave, (LivingEntity) entity, unplaced)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean pushOne(Wave wave, LivingEntity entity, Set<Long> unplaced) {
-        Location feet = entity.getLocation();
-        int bx = feet.getBlockX();
-        int bz = feet.getBlockZ();
-        int startY = feet.getBlockY();
-        for (int y = startY; y <= startY + BODY_PUSH_MAX; y++) {
-            if (passableForPush(wave, bx, y, bz, unplaced) && passableForPush(wave, bx, y + 1, bz, unplaced)) {
-                entity.teleport(new Location(wave.world, feet.getX(), y, feet.getZ(), feet.getYaw(), feet.getPitch()));
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean passableForPush(Wave wave, int x, int y, int z, Set<Long> unplaced) {
-        if (unplaced.contains(key(x, y, z))) {
-            return false;
-        }
-        return wave.world.getBlockAt(x, y, z).isPassable();
-    }
-
-    private Set<Long> unplacedKeys(Wave wave) {
-        Set<Long> keys = new HashSet<>();
-        for (int i = wave.completed; i < wave.printable.size(); i++) {
-            Location loc = wave.printable.get(i);
-            keys.add(key(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ()));
-        }
-        return keys;
     }
 
     // ---------------------------------------------------------------- stop / settle
@@ -510,24 +903,56 @@ public final class WaveRunner {
 
     private void stop(Wave wave, Player player, StopReason reason, Location at) {
         // No refund: feedstock is spent per cell, so unspent items are still in the inventory.
+        if (reason == StopReason.INTERNAL_ERROR && wave.successfulCells() == 0
+                && wave.activationReceipt != null && player != null) {
+            restoreUse(wave, player, wave.activationReceipt);
+            wave.usesSpent = Math.max(0L, wave.usesSpent - wave.activationUses);
+        }
         recordStatistics(wave, false, player != null
                 && reason != StopReason.SERVER_STOPPING && reason != StopReason.PLAYER_QUIT);
         releaseTickets(wave);
         waves.remove(wave.owner);
         if (player != null) {
-            player.sendMessage(Component.text(wave.completed + "/" + wave.total()
-                    + " cells placed; " + reason.phrase(at) + ".", NamedTextColor.GOLD));
+            player.sendMessage(Component.text("BLOCKED — " + wave.successfulCells() + "/" + wave.total()
+                    + " admitted cells completed; " + reason.phrase(at) + ".", NamedTextColor.RED));
         }
         stopTaskIfIdle();
     }
 
     private void settle(Wave wave, Player player) {
-        recordStatistics(wave, true, player != null);
+        int skipped = wave.skippedOccupied();
+        boolean fullyCompleted = !wave.partialAdmission && skipped == 0;
+        recordStatistics(wave, fullyCompleted, player != null);
         releaseTickets(wave);
         waves.remove(wave.owner);
         if (player != null) {
-            player.sendActionBar(Component.text("Printed " + wave.total() + " "
-                    + WandItems.materialDisplayName(wave.material.placedBlock()) + "."));
+            if (wave.partialAdmission) {
+                int unresolvedPlan = wave.requestedPrintableCells - wave.successfulCells();
+                player.sendMessage(Component.text("PARTIAL BUILD complete — " + wave.successfulCells()
+                        + " / " + wave.requestedPrintableCells + " cells completed; " + unresolvedPlan
+                        + (wave.options.prefab()
+                        ? " remain. Restock and use the anchored prefab preview to continue."
+                        : " remain in the frozen plan. Restock and right-click to continue."),
+                        NamedTextColor.YELLOW));
+            } else if (!fullyCompleted) {
+                String noun = skipped == 1 ? "cell was" : "cells were";
+                player.sendMessage(Component.text("Completed " + wave.successfulCells() + "/" + wave.total()
+                        + " cells; " + skipped + " still-occupied " + noun
+                        + " skipped. Reprint after the area clears to fill the gaps.", NamedTextColor.YELLOW));
+            } else {
+                String message;
+                if (wave.options.prefab()) {
+                    message = "Printed " + wave.options.label() + " (" + wave.total() + " cells).";
+                } else if (wave.materialSelection.singleMaterial()) {
+                    message = "Printed " + wave.total() + " "
+                            + WandItems.materialDisplayName(
+                                    wave.materialSelection.entries().getFirst().placedBlock())
+                            + ".";
+                } else {
+                    message = "Printed " + wave.total() + " palette blocks.";
+                }
+                player.sendActionBar(Component.text("COMPLETE — " + message, NamedTextColor.GREEN));
+            }
         }
         stopTaskIfIdle();
     }
@@ -596,15 +1021,127 @@ public final class WaveRunner {
 
     // ---------------------------------------------------------------- helpers
 
+    private PlacementQuote quote(Player player, Plan plan, List<PlannedCell> printable, int kept,
+                                 ItemStack wand, UseCounter.State wandUses,
+                                 boolean creative, boolean usesBypass) {
+        Map<Material, Integer> available = availableMaterials(player, printable);
+        List<PlacementBudget.Cost> costs = printable.stream().map(this::costOf).toList();
+        int activationUses = plan.options().activationUses();
+        int cellUseBalance = remainingUsesForCells(
+                wandUses.remaining(), activationUses, usesBypass);
+        PlacementBudget.Result budget = PlacementBudget.evaluate(costs, available,
+                cellUseBalance, creative, usesBypass);
+        List<PlannedCell> admitted = budget.affordableIndices().stream()
+                .map(printable::get)
+                .toList();
+        List<String> worldStates = new ArrayList<>(
+                plan.targets().size() + plan.options().clearanceCells().size());
+        plan.targets().stream()
+                .map(target -> target.location().getBlock().getBlockData().getAsString())
+                .forEach(worldStates::add);
+        plan.options().clearanceCells().stream()
+                .map(cell -> plan.world().getBlockAt(cell.getBlockX(), cell.getBlockY(), cell.getBlockZ())
+                        .getBlockData().getAsString())
+                .forEach(worldStates::add);
+        plan.options().validationCells().stream()
+                .map(cell -> plan.world().getBlockAt(cell.location().getBlockX(),
+                        cell.location().getBlockY(), cell.location().getBlockZ())
+                        .getBlockData().getAsString())
+                .forEach(worldStates::add);
+        return new PlacementQuote(plan, printable, admitted, kept, available, budget,
+                wandUses.remaining(), wandUses.maximum(), creative, usesBypass,
+                wandItems.identity(wand).wandId(), wandItems.getRotation(wand), worldStates,
+                System.nanoTime());
+    }
+
+    /**
+     * Reserves a prefab's fixed invocation cost before the stable per-cell budget is evaluated.
+     * The Uses bypass keeps the displayed PDC balance intact while allowing every cell through
+     * the budget, matching the later no-debit activation receipt.
+     */
+    public static int remainingUsesForCells(int remainingUses, int activationUses,
+                                            boolean usesBypass) {
+        if (remainingUses < 0 || activationUses < 0) {
+            throw new IllegalArgumentException("Uses cannot be negative");
+        }
+        return usesBypass ? remainingUses : Math.max(0, remainingUses - activationUses);
+    }
+
+    private void sendQuote(Player player, PlacementQuote quote, boolean refreshed) {
+        boolean partial = quote.partial();
+        NamedTextColor color = partial ? NamedTextColor.YELLOW : NamedTextColor.GREEN;
+        String status = partial ? "PARTIAL BUILD" : "READY";
+        String changed = refreshed ? "Updated quote: " : "";
+        player.sendMessage(Component.text(changed + status + " — can place "
+                + quote.admitted().size() + " / " + quote.printable().size()
+                + (partial ? "; " + quote.remainingCells() + " will remain." : "."), color));
+        if (partial) {
+            long missingUses = quote.usesBypass() ? 0L
+                    : Math.max(0L, quote.requiredTotalUses() - quote.remainingUses());
+            player.sendMessage(Component.text("Missing: "
+                    + shortageSummary(quote.budget().missingMaterials(), missingUses)
+                    + " · Uses: " + (quote.usesBypass() ? "bypassed" : quote.remainingUses()
+                    + " available / " + quote.requiredTotalUses() + " needed"),
+                    NamedTextColor.YELLOW));
+        }
+        player.sendMessage(Component.text(partial
+                ? "Right-click again to PLACE AVAILABLE, or left-click to cancel."
+                : "Right-click again to PLACE, or left-click to cancel.", color));
+    }
+
+    private static String blockedShortage(PlacementQuote quote) {
+        long missingUses = quote.usesBypass() ? 0L
+                : Math.max(0L, quote.requiredTotalUses() - quote.remainingUses());
+        return "BLOCKED — 0 / " + quote.printable().size() + " cells can be placed; "
+                + shortageSummary(quote.budget().missingMaterials(), missingUses)
+                + ". Nothing changed or spent.";
+    }
+
+    private Map<Material, Integer> availableMaterials(Player player, List<PlannedCell> targets) {
+        Map<Material, Integer> available = new LinkedHashMap<>();
+        for (PlannedCell target : targets) {
+            available.computeIfAbsent(target.material().sourceItem(), material ->
+                    Feedstock.available(player.getInventory(), target.material(), wandItems));
+        }
+        return available;
+    }
+
+    private PlacementBudget.Cost costOf(PlannedCell target) {
+        return new PlacementBudget.Cost(target.material().sourceItem(),
+                !target.material().reusable(),
+                PlacementUseCost.perCell(target.material(), config.waterUsesPerSource));
+    }
+
+    private static String missingMaterialsSummary(Map<Material, Integer> missing) {
+        StringJoiner summary = new StringJoiner(", ");
+        missing.forEach((material, count) -> summary.add(count + " "
+                + WandItems.materialDisplayName(material)));
+        return summary.toString();
+    }
+
+    private static String shortageSummary(Map<Material, Integer> missing, long missingUses) {
+        StringJoiner summary = new StringJoiner(" and ");
+        if (!missing.isEmpty()) {
+            summary.add("restock " + missingMaterialsSummary(missing));
+        }
+        if (missingUses > 0L) {
+            summary.add("restore " + missingUses + " Uses");
+        }
+        return summary.length() == 0 ? "restock or restore Uses" : summary.toString();
+    }
+
     private static String coords(Location loc) {
         return loc.getBlockX() + ", " + loc.getBlockY() + ", " + loc.getBlockZ();
+    }
+
+    private static long chunkKey(Location location) {
+        int chunkX = Math.floorDiv(location.getBlockX(), 16);
+        int chunkZ = Math.floorDiv(location.getBlockZ(), 16);
+        return ((long) chunkX << 32) ^ (chunkZ & 0xffffffffL);
     }
 
     private static Component red(String text) {
         return Component.text(text, NamedTextColor.RED);
     }
 
-    private static long key(int x, int y, int z) {
-        return (((long) x) & 0x3FFFFFFL) << 38 | (((long) z) & 0x3FFFFFFL) << 12 | (((long) y) & 0xFFFL);
-    }
 }
