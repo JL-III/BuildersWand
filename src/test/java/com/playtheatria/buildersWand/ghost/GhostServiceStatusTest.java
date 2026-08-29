@@ -1,6 +1,7 @@
 package com.playtheatria.buildersWand.ghost;
 
 import com.playtheatria.buildersWand.form.Form;
+import com.playtheatria.buildersWand.wave.PlacementBudget;
 import org.bukkit.util.BlockVector;
 import org.junit.jupiter.api.Test;
 
@@ -8,6 +9,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GhostServiceStatusTest {
@@ -15,17 +17,30 @@ class GhostServiceStatusTest {
     @Test
     void affordableWaterPremiumIsInformationNotCaution() {
         assertEquals(GhostService.PreviewStatus.READY,
-                GhostService.previewStatus(false, false, true));
+                GhostService.previewStatus(false, true, true));
         assertEquals(GhostService.PreviewStatus.READY,
-                GhostService.previewStatus(false, false, false));
+                GhostService.previewStatus(false, true, false));
     }
 
     @Test
-    void waterShortageAndHardFailureKeepTheirAdmissionStatus() {
-        assertEquals(GhostService.PreviewStatus.PARTIAL,
-                GhostService.previewStatus(false, true, true));
+    void waterShortageAndHardFailureBothBlockTheCompleteOperation() {
         assertEquals(GhostService.PreviewStatus.BLOCKED,
-                GhostService.previewStatus(true, false, true));
+                GhostService.previewStatus(false, false, true));
+        assertEquals(GhostService.PreviewStatus.BLOCKED,
+                GhostService.previewStatus(true, true, true));
+    }
+
+    @Test
+    void resourceShortageKeepsAffordableCellsGreenAndMarksUnavailableCellsRed() {
+        PlacementBudget.Decision affordable = new PlacementBudget.Decision(true, true, true);
+        PlacementBudget.Decision unavailable = new PlacementBudget.Decision(false, false, true);
+
+        assertFalse(GhostService.previewCellBlocked(
+                GhostService.PreviewStatus.BLOCKED, true, affordable));
+        assertTrue(GhostService.previewCellBlocked(
+                GhostService.PreviewStatus.BLOCKED, true, unavailable));
+        assertTrue(GhostService.previewCellBlocked(
+                GhostService.PreviewStatus.BLOCKED, false, affordable));
     }
 
     @Test

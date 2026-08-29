@@ -7,7 +7,6 @@ import com.playtheatria.buildersWand.prefab.PrefabPlacementController;
 import com.playtheatria.buildersWand.wand.BlockOrientation;
 import com.playtheatria.buildersWand.wand.WandItems;
 import com.playtheatria.buildersWand.wave.Plan;
-import com.playtheatria.buildersWand.wave.PlacementQuote;
 import com.playtheatria.buildersWand.wave.StopReason;
 import com.playtheatria.buildersWand.wave.WaveRunner;
 import net.kyori.adventure.text.Component;
@@ -128,9 +127,6 @@ public final class GestureListener implements Listener {
         if (restrictionChanged) {
             session.surfaceSources = null;
         }
-        session.frozenPlan = null;
-        session.placementQuote = null;
-        session.blockedReason = null;
     }
 
     /** Drop the player's gesture: anchor, locks, and ghost. */
@@ -266,12 +262,6 @@ public final class GestureListener implements Listener {
     }
 
     private void handleLeftClick(Player player, ItemStack wand) {
-        GestureSession session = sessions.get(player.getUniqueId());
-        if (session != null && session.frozenPlan != null) {
-            clearSession(player);
-            player.sendActionBar(Component.text("Frozen plan cancelled.", NamedTextColor.GRAY));
-            return;
-        }
         if (player.isSneaking()) {
             int rotation = wandItems.cycleRotation(wand); // keep the live gesture
             player.getInventory().setItemInOffHand(wand);
@@ -321,38 +311,17 @@ public final class GestureListener implements Listener {
                     : selection.problem()));
             return;
         }
-        PlacementQuote pendingQuote = session.placementQuote;
-        WaveRunner.CommitResult result = waveRunner.commit(player, plan.get(), pendingQuote);
+        WaveRunner.CommitResult result = waveRunner.commit(player, plan.get(), null);
         switch (result.status()) {
             case QUOTED -> {
-                session.frozenPlan = plan.get();
-                session.placementQuote = result.quote();
-                session.blockedReason = null;
+                // Ordinary forms never require confirmation. Fail closed if a future plan is
+                // accidentally configured as one instead of leaving hidden session state behind.
+                clearSession(player);
+                player.sendMessage(red("BLOCKED — This print requested an unsupported confirmation."
+                        + " Nothing changed or spent."));
             }
-            case STARTED_PARTIAL -> {
-                session.frozenPlan = plan.get();
-                session.placementQuote = null;
-                session.blockedReason = null;
-            }
-            case STARTED_COMPLETE -> clearSession(player);
-            case BLOCKED -> {
-                if (result.adjustableRefusal()) {
-                    // Size/scan/chunk refusals remain live so the next aim update can make the
-                    // shape legal. Freezing here made an over-limit shape impossible to resize.
-                    session.frozenPlan = null;
-                    session.placementQuote = null;
-                    session.blockedReason = null;
-                    return;
-                }
-                // At the final stage, retain the intended geometry so red means this exact plan is
-                // blocked and the player can correct resources or world state without re-aiming.
-                session.frozenPlan = plan.get();
-                session.placementQuote = null;
-                // Resource-zero is recomputed live so restocking immediately changes the red
-                // preview. Hard refusals stay red until the player retries or cancels.
-                session.blockedReason = result.reason().startsWith("BLOCKED — 0 /")
-                        ? null : result.reason();
-            }
+            case STARTED -> clearSession(player);
+            case BLOCKED -> { /* Keep only the normal live anchor and locks; never freeze a job. */ }
         }
     }
 

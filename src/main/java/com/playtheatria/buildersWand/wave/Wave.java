@@ -23,7 +23,7 @@ public final class Wave {
     public final World world;
     public final MaterialSelectionSnapshot materialSelection;
     public final PlanOptions options;
-    /** Exact cells admitted by the full or explicitly confirmed partial resource quote. */
+    /** Exact fully funded cells admitted when the wave started. */
     public final List<PlannedCell> printable;
     final DeferredPlacementQueue<PlannedCell> placements;
     public final int ticksPerCell;
@@ -34,11 +34,6 @@ public final class Wave {
     /** Up-front prefab invocation debit, restored only for a zero-cell internal start failure. */
     public final WandItems.UseReceipt activationReceipt;
     public final int activationUses;
-    /** Printable cells in the frozen plan before the resource subset was selected. */
-    public final int requestedPrintableCells;
-    /** True when this wave intentionally leaves resource-short cells for a continuation. */
-    public final boolean partialAdmission;
-
     public long usesSpent;
     public int actualBlocksPlaced;
     public int actualWaterCells;
@@ -49,7 +44,7 @@ public final class Wave {
                 MaterialSelectionSnapshot materialSelection, PlanOptions options,
                 List<PlannedCell> printable,
                 int ticksPerCell, Set<Chunk> tickets, boolean creative,
-                boolean usesBypass, String wandToken, int requestedPrintableCells,
+                boolean usesBypass, String wandToken,
                 WandItems.UseReceipt activationReceipt, int activationUses) {
         this.owner = owner;
         this.ownerName = ownerName;
@@ -68,11 +63,6 @@ public final class Wave {
             throw new IllegalArgumentException("activation Uses cannot be negative");
         }
         this.activationUses = activationUses;
-        if (requestedPrintableCells < printable.size()) {
-            throw new IllegalArgumentException("requested cells cannot be fewer than admitted cells");
-        }
-        this.requestedPrintableCells = requestedPrintableCells;
-        this.partialAdmission = printable.size() < requestedPrintableCells;
         this.usesSpent = activationUses;
         this.actualBlocksPlaced = 0;
         this.actualWaterCells = 0;

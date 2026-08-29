@@ -26,9 +26,10 @@ It is a guide, not another block that the wand will place.
 The preview and messages use one status language:
 
 - **Green — READY:** the complete build can be placed.
-- **Yellow — CAUTION or PARTIAL BUILD:** review a condition that needs attention or confirm the
-  portion you can currently afford.
-- **Red — BLOCKED:** nothing can begin; the message tells you what must change.
+- **Yellow details:** supporting information such as water's higher Use cost; yellow never means a
+  smaller subset will be placed.
+- **Red — BLOCKED:** nothing can begin; this includes missing materials or Uses, and the message
+  tells you what must change.
 
 ## Controls
 
@@ -68,7 +69,7 @@ to **9 chunks**, and each shape also has its own maximum dimensions. Prefabs use
 If a complete operation is too large, its normal block preview is replaced by a lightweight red
 boundary. The message gives the exact limit reason plus an **Aim closer to reduce the shape**
 hint. It does not show material or Uses costs because none of that oversized operation can begin.
-Right-clicking does not cancel the anchor or start a partial print; keep aiming to resize it, or
+Right-clicking does not cancel the anchor or start a smaller print; keep aiming to resize it, or
 left-click to cancel.
 
 Sizing can extend in either direction. In particular, aiming below a Box anchor deliberately grows
@@ -122,7 +123,7 @@ changing just because a stack ran low.
 Doors, beds, containers, lava buckets, and other unsuitable materials cannot join an ordinary
 palette. The wand also respects protected claims and regions.
 
-## Materials, Uses, and partial builds
+## Materials, Uses, and affordability
 
 | Material | Inventory cost | Wand cost |
 |---|---:|---:|
@@ -133,15 +134,14 @@ Cells that are already built are **kept** and cost no block or Use. A solid prin
 occupied by a player or mob instead of moving or trapping that entity. Skipped cells cost nothing
 and can be filled by printing again after the area is clear.
 
-If you cannot afford the complete build, the full shape stays visible. Cells available now remain
-green and the remainder turns yellow. Your first print request places and spends nothing; it gives
-you an exact **PARTIAL BUILD** quote. Right-click again within the shown time to **PLACE AVAILABLE**,
-or left-click to cancel.
+Every printable cell must be affordable before a print can start. If even one assigned material or
+Use is missing, the unavailable cells glow red and the entire operation is **BLOCKED**. The wand
+shows the exact shortage and places or spends nothing; it never silently makes a smaller build.
 
-The quoted plan is frozen. If the palette, inventory, Uses, wand, world, shape, protection, or
-target blocks change, an old confirmation cannot place a different subset. The wand shows a new
-quote instead. After a partial print, the unfinished preview stays anchored so you can restock and
-continue.
+Restock the required blocks or restore enough Uses while the preview is active. The live preview
+updates as your resources change and becomes green **READY** only when the complete printable plan
+is affordable. Ordinary shapes can then print normally. There is no subset confirmation or
+retained shortage continuation.
 
 There is no wand undo. Mine placed blocks normally if you want to remove or reclaim them.
 Essentials `/fix` does not restore Builders Wand Uses.
@@ -193,10 +193,13 @@ An exact prefab block already at the destination is kept for free. A solid confl
 blocked interior clearance, protected cell, or living entity prevents the placement from starting.
 Clear the problem and request a fresh quote. The wand never clears terrain for a prefab.
 
-If resources are short, prefabs use the same yellow **PARTIAL BUILD** confirmation as ordinary
-shapes. Each confirmed continuation is a new prefab placement and pays the design's activation Uses
-again. You can also rerun the reusable design at the same anchor: exact finished cells are kept, and
-only the missing cells are quoted.
+If resources are short, a prefab is red **BLOCKED** and offers no placement confirmation. Every
+missing prefab cell plus the activation Uses must be affordable together. Restock or restore Uses,
+then right-click for a new complete quote and use the normal **PLACE** confirmation.
+
+You can rerun a reusable design at the same anchor after an interrupted placement. Exact finished
+cells are kept for free, but every remaining printable cell must be affordable before that rerun
+can begin.
 
 ### Blueprint Vouchers
 

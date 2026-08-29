@@ -84,9 +84,6 @@ public final class LivePlan {
 
     /** The live plan for the ghost and the print click. Empty when no valid material. */
     public static Optional<Plan> derive(Player player, GestureSession session, PluginConfig config, WandItems wandItems) {
-        if (session.frozenPlan != null) {
-            return Optional.of(session.frozenPlan);
-        }
         Optional<MaterialSelectionSnapshot> selection = wandItems.selectedMaterialSnapshot(player);
         if (selection.isEmpty()) {
             return Optional.empty();
@@ -109,9 +106,6 @@ public final class LivePlan {
     public static Optional<Plan> derive(Player player, GestureSession session, PluginConfig config,
                                         MaterialSelectionSnapshot selection, int rotation,
                                         Density requestedDensity) {
-        if (session.frozenPlan != null) {
-            return Optional.of(session.frozenPlan);
-        }
         Map<Material, BlockData> orientedData = new EnumMap<>(Material.class);
 
         if (session.anchor == null) {
@@ -174,9 +168,9 @@ public final class LivePlan {
         return new PlannedCell(location, material, blockData);
     }
 
-    /** Freeze the current stage into the session on a lock click (design §7.3). */
+    /** Lock the current dimension stage into the session (design §7.3). */
     public static void applyLock(Player player, GestureSession session, PluginConfig config) {
-        if (session.anchor == null || session.frozenPlan != null) {
+        if (session.anchor == null) {
             return;
         }
         Aim aim = Aim.of(player, config, session.form);

@@ -47,7 +47,7 @@ every ported rule is restated here in full so an implementer needs no access to 
   final right-click prints exactly what the ghost shows (§7).
 - Anchor = the empty cell adjacent to the clicked face, like ordinary block placement.
 - Skip-and-keep: occupied cells are kept as they stand, never charged; a blueprint
-  *completes* a partial shape (§9). All-cells-already-built is a refusal.
+  *completes* a previously unfinished shape (§9). All-cells-already-built is a refusal.
 - One wave per player at a time; a busy materializer refuses.
 - Reveal cadence: ≤16 printable cells → 1 cell per 2 ticks; 17+ → 1 cell per tick (§10.2).
 - Mid-wave: a cell that became occupied stops the wave *before* that cell and refunds the
@@ -523,7 +523,7 @@ Unit tests (JUnit 5, no server):
    length, lock width, stretch height, print. Blocks appear one per tick with place sounds.
 2. Printing 20 cells with 18 stone: refused with `Need 20 stone; have 18. Nothing changed
    or spent.` — inventory untouched, no blocks placed.
-3. A box printed over a partially built wall keeps the existing blocks, charges only the
+3. A box printed over an unfinished wall keeps the existing blocks, charges only the
    missing cells, and the action bar's `kept` count matches.
 4. Left-click cancels; switching hotbar slots drops the ghost; `/wand form` mid-gesture
    drops the anchor; swapping the offhand block mid-gesture re-colors the ghost in place.

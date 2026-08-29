@@ -48,13 +48,12 @@ import java.util.UUID;
 public final class WaveRunner {
 
     public enum CommitStatus {
-        STARTED_COMPLETE,
-        STARTED_PARTIAL,
+        STARTED,
         QUOTED,
         BLOCKED
     }
 
-    /** Result consumed by the gesture session so a partial plan remains frozen between clicks. */
+    /** Result consumed by ordinary gestures and prefab confirmation. */
     public record CommitResult(CommitStatus status, PlacementQuote quote, String reason,
                                boolean adjustableRefusal) {
         public CommitResult {
@@ -64,9 +63,8 @@ public final class WaveRunner {
             reason = reason == null ? "" : reason;
         }
 
-        static CommitResult started(boolean partial) {
-            return new CommitResult(partial ? CommitStatus.STARTED_PARTIAL
-                    : CommitStatus.STARTED_COMPLETE, null, "", false);
+        static CommitResult started() {
+            return new CommitResult(CommitStatus.STARTED, null, "", false);
         }
 
         static CommitResult quoted(PlacementQuote quote) {
@@ -90,6 +88,10 @@ public final class WaveRunner {
     private final BuildStatsStore buildStats;
     private final Map<UUID, Wave> waves = new java.util.HashMap<>();
 
+    private record ResourceEvaluation(Map<Material, Integer> available,
+                                      PlacementBudget.Result budget) {
+    }
+
     private BukkitTask task;
 
     public WaveRunner(JavaPlugin plugin, ProtectionBridge protection, PlacementLogger placementLogger,
@@ -105,8 +107,8 @@ public final class WaveRunner {
     // ---------------------------------------------------------------- commit (design §9)
 
     /**
-     * Runs the §9 pipeline. A resource-short first request returns an immutable quote and changes
-     * nothing; only an exact second request can start that quoted subset.
+     * Runs the §9 pipeline. Resource-short plans are refused without mutation. Prefabs return a
+     * full immutable quote only after every printable cell and Use is affordable.
      */
     public CommitResult commit(Player player, Plan plan, PlacementQuote pendingQuote) {
         UUID id = player.getUniqueId();
@@ -157,7 +159,7 @@ public final class WaveRunner {
             return CommitResult.blocked(reason);
         }
         if (!player.getWorld().equals(plan.world())) {
-            String reason = "BLOCKED — The frozen plan belongs to another world.";
+            String reason = "BLOCKED — The print plan belongs to another world.";
             player.sendMessage(red(reason));
             return CommitResult.blocked(reason);
         }
@@ -342,45 +344,36 @@ public final class WaveRunner {
             return CommitResult.blocked(reason);
         }
 
-        // 7. Simulate the complete material and Use budget in stable plan order.
+        // 7. Simulate the complete material and Use budget in stable plan order. Per-cell
+        // decisions remain useful to the preview, but no affordable subset is ever admitted.
         boolean creative = player.getGameMode() == GameMode.CREATIVE;
-        PlacementQuote quote = quote(player, plan, printable, kept, wand, wandUses,
+        ResourceEvaluation resources = evaluateResources(player, plan, printable, wandUses,
                 creative, usesBypass);
-
-        // A confirmation is admitted only when every bound input still produces the identical
-        // quote. If anything changed, show the replacement quote and require another click.
-        int confirmationSeconds = plan.options().alwaysConfirm()
-                ? plan.options().confirmationSeconds() : config.partialConfirmationSeconds;
-        boolean quoteTimedOut = pendingQuote != null && pendingQuote.expiredAt(
-                System.nanoTime(), confirmationSeconds);
-        if (pendingQuote != null && (quoteTimedOut || !pendingQuote.sameBinding(quote))) {
-            String expiryReason = quoteTimedOut
-                    ? "its confirmation time elapsed"
-                    : "resources, wand state, or the target changed";
-            player.sendMessage(red("BLOCKED — The previous quote expired because " + expiryReason
-                    + ". Nothing was placed."));
-            if (quote.admitted().isEmpty()) {
-                String reason = blockedShortage(quote);
-                player.sendMessage(red(reason));
-                return CommitResult.blocked(reason);
-            }
-            if (!plan.options().alwaysConfirm()) {
-                sendQuote(player, quote, true);
-            }
-            return CommitResult.quoted(quote);
+        if (!resources.budget().fullyAffordable()) {
+            String reason = blockedShortage(plan, resources.budget(), wandUses.remaining(),
+                    usesBypass);
+            player.sendMessage(red(reason));
+            return CommitResult.adjustableRefusal(reason);
         }
+        PlacementQuote quote = quote(plan, printable, kept, wand, wandUses, creative, usesBypass,
+                resources);
 
-        if (pendingQuote == null
-                && (plan.options().alwaysConfirm() || !quote.budget().fullyAffordable())) {
-            if (quote.admitted().isEmpty()) {
-                String reason = blockedShortage(quote);
-                player.sendMessage(red(reason));
-                return CommitResult.blocked(reason);
+        // Only prefabs require confirmation. A changed confirmation never places a different plan;
+        // it is replaced with a new fully affordable quote.
+        if (plan.options().alwaysConfirm()) {
+            boolean quoteTimedOut = pendingQuote != null && pendingQuote.expiredAt(
+                    System.nanoTime(), plan.options().confirmationSeconds());
+            if (pendingQuote != null && (quoteTimedOut || !pendingQuote.sameBinding(quote))) {
+                String expiryReason = quoteTimedOut
+                        ? "its confirmation time elapsed"
+                        : "resources, wand state, or the target changed";
+                player.sendMessage(red("BLOCKED — The previous quote expired because "
+                        + expiryReason + ". Nothing was placed."));
+                return CommitResult.quoted(quote);
             }
-            if (!plan.options().alwaysConfirm()) {
-                sendQuote(player, quote, false);
+            if (pendingQuote == null) {
+                return CommitResult.quoted(quote);
             }
-            return CommitResult.quoted(quote);
         }
 
         return startWave(player, quote, wand, wandUses);
@@ -388,10 +381,12 @@ public final class WaveRunner {
 
     private CommitResult startWave(Player player, PlacementQuote quote, ItemStack wand,
                                    UseCounter.State wandUses) {
+        if (!quote.budget().fullyAffordable()) {
+            throw new IllegalArgumentException("cannot start a resource-short placement quote");
+        }
         UUID id = player.getUniqueId();
-        List<PlannedCell> admitted = quote.admitted();
-        int need = admitted.size();
-        boolean partial = quote.partial();
+        List<PlannedCell> printable = quote.printable();
+        int need = printable.size();
 
         // Bind this wave to the exact held item only after every refusal check has passed.
         // The token is rotated here so cloned kit templates cannot share a permanent identity.
@@ -419,7 +414,7 @@ public final class WaveRunner {
         // 9. Start the wave: chunk tickets over the plan, register, schedule
         Set<Chunk> tickets = new HashSet<>();
         try {
-            for (PlannedCell target : admitted) {
+            for (PlannedCell target : printable) {
                 Location loc = target.location();
                 Chunk chunk = loc.getChunk();
                 if (tickets.add(chunk)) {
@@ -439,9 +434,9 @@ public final class WaveRunner {
                 : config.largePrintTicksPerCell;
         try {
             waves.put(id, new Wave(id, player.getName(), quote.plan().world(),
-                    quote.plan().materialSelection(), quote.plan().options(), admitted,
+                    quote.plan().materialSelection(), quote.plan().options(), printable,
                     ticksPerCell, tickets, quote.creative(), quote.usesBypass(), wandToken,
-                    quote.printable().size(), activationReceipt, activationUses));
+                    activationReceipt, activationUses));
             ensureTask();
         } catch (RuntimeException error) {
             waves.remove(id);
@@ -454,12 +449,10 @@ public final class WaveRunner {
         }
 
         String usesText = quote.usesBypass() ? "Uses bypassed" : wandUses.remaining() + " Uses available";
-        NamedTextColor statusColor = partial ? NamedTextColor.YELLOW : NamedTextColor.GREEN;
-        String status = partial ? "PARTIAL BUILD" : "READY";
-        Component startMessage = Component.text(status + " — Printing " + quote.plan().options().label() + ": "
-                + need + (partial ? " / " + quote.printable().size() : "") + " cells ("
-                + quote.kept() + " kept); " + usesText + ".", statusColor);
-        long waterCells = admitted.stream().filter(target -> target.material().isWater()).count();
+        Component startMessage = Component.text("READY — Printing "
+                + quote.plan().options().label() + ": " + need + " cells ("
+                + quote.kept() + " kept); " + usesText + ".", NamedTextColor.GREEN);
+        long waterCells = printable.stream().filter(target -> target.material().isWater()).count();
         if (waterCells > 0) {
             long plannedUses = PlacementUseCost.totalUses((int) waterCells, config.waterUsesPerSource);
             String notice = quote.usesBypass()
@@ -470,7 +463,7 @@ public final class WaveRunner {
             startMessage = startMessage.append(Component.text(notice, NamedTextColor.YELLOW));
         }
         player.sendMessage(startMessage);
-        return CommitResult.started(partial);
+        return CommitResult.started();
     }
 
     private void rollbackFailedStart(Player player, ItemStack wand, String wandToken,
@@ -914,27 +907,19 @@ public final class WaveRunner {
         waves.remove(wave.owner);
         if (player != null) {
             player.sendMessage(Component.text("BLOCKED — " + wave.successfulCells() + "/" + wave.total()
-                    + " admitted cells completed; " + reason.phrase(at) + ".", NamedTextColor.RED));
+                    + " planned cells completed; " + reason.phrase(at) + ".", NamedTextColor.RED));
         }
         stopTaskIfIdle();
     }
 
     private void settle(Wave wave, Player player) {
         int skipped = wave.skippedOccupied();
-        boolean fullyCompleted = !wave.partialAdmission && skipped == 0;
+        boolean fullyCompleted = skipped == 0;
         recordStatistics(wave, fullyCompleted, player != null);
         releaseTickets(wave);
         waves.remove(wave.owner);
         if (player != null) {
-            if (wave.partialAdmission) {
-                int unresolvedPlan = wave.requestedPrintableCells - wave.successfulCells();
-                player.sendMessage(Component.text("PARTIAL BUILD complete — " + wave.successfulCells()
-                        + " / " + wave.requestedPrintableCells + " cells completed; " + unresolvedPlan
-                        + (wave.options.prefab()
-                        ? " remain. Restock and use the anchored prefab preview to continue."
-                        : " remain in the frozen plan. Restock and right-click to continue."),
-                        NamedTextColor.YELLOW));
-            } else if (!fullyCompleted) {
+            if (!fullyCompleted) {
                 String noun = skipped == 1 ? "cell was" : "cells were";
                 player.sendMessage(Component.text("Completed " + wave.successfulCells() + "/" + wave.total()
                         + " cells; " + skipped + " still-occupied " + noun
@@ -1021,9 +1006,10 @@ public final class WaveRunner {
 
     // ---------------------------------------------------------------- helpers
 
-    private PlacementQuote quote(Player player, Plan plan, List<PlannedCell> printable, int kept,
-                                 ItemStack wand, UseCounter.State wandUses,
-                                 boolean creative, boolean usesBypass) {
+    private ResourceEvaluation evaluateResources(Player player, Plan plan,
+                                                 List<PlannedCell> printable,
+                                                 UseCounter.State wandUses,
+                                                 boolean creative, boolean usesBypass) {
         Map<Material, Integer> available = availableMaterials(player, printable);
         List<PlacementBudget.Cost> costs = printable.stream().map(this::costOf).toList();
         int activationUses = plan.options().activationUses();
@@ -1031,9 +1017,13 @@ public final class WaveRunner {
                 wandUses.remaining(), activationUses, usesBypass);
         PlacementBudget.Result budget = PlacementBudget.evaluate(costs, available,
                 cellUseBalance, creative, usesBypass);
-        List<PlannedCell> admitted = budget.affordableIndices().stream()
-                .map(printable::get)
-                .toList();
+        return new ResourceEvaluation(available, budget);
+    }
+
+    private PlacementQuote quote(Plan plan, List<PlannedCell> printable, int kept,
+                                 ItemStack wand, UseCounter.State wandUses,
+                                 boolean creative, boolean usesBypass,
+                                 ResourceEvaluation resources) {
         List<String> worldStates = new ArrayList<>(
                 plan.targets().size() + plan.options().clearanceCells().size());
         plan.targets().stream()
@@ -1048,7 +1038,7 @@ public final class WaveRunner {
                         cell.location().getBlockY(), cell.location().getBlockZ())
                         .getBlockData().getAsString())
                 .forEach(worldStates::add);
-        return new PlacementQuote(plan, printable, admitted, kept, available, budget,
+        return new PlacementQuote(plan, printable, kept, resources.available(), resources.budget(),
                 wandUses.remaining(), wandUses.maximum(), creative, usesBypass,
                 wandItems.identity(wand).wandId(), wandItems.getRotation(wand), worldStates,
                 System.nanoTime());
@@ -1067,33 +1057,13 @@ public final class WaveRunner {
         return usesBypass ? remainingUses : Math.max(0, remainingUses - activationUses);
     }
 
-    private void sendQuote(Player player, PlacementQuote quote, boolean refreshed) {
-        boolean partial = quote.partial();
-        NamedTextColor color = partial ? NamedTextColor.YELLOW : NamedTextColor.GREEN;
-        String status = partial ? "PARTIAL BUILD" : "READY";
-        String changed = refreshed ? "Updated quote: " : "";
-        player.sendMessage(Component.text(changed + status + " — can place "
-                + quote.admitted().size() + " / " + quote.printable().size()
-                + (partial ? "; " + quote.remainingCells() + " will remain." : "."), color));
-        if (partial) {
-            long missingUses = quote.usesBypass() ? 0L
-                    : Math.max(0L, quote.requiredTotalUses() - quote.remainingUses());
-            player.sendMessage(Component.text("Missing: "
-                    + shortageSummary(quote.budget().missingMaterials(), missingUses)
-                    + " · Uses: " + (quote.usesBypass() ? "bypassed" : quote.remainingUses()
-                    + " available / " + quote.requiredTotalUses() + " needed"),
-                    NamedTextColor.YELLOW));
-        }
-        player.sendMessage(Component.text(partial
-                ? "Right-click again to PLACE AVAILABLE, or left-click to cancel."
-                : "Right-click again to PLACE, or left-click to cancel.", color));
-    }
-
-    private static String blockedShortage(PlacementQuote quote) {
-        long missingUses = quote.usesBypass() ? 0L
-                : Math.max(0L, quote.requiredTotalUses() - quote.remainingUses());
-        return "BLOCKED — 0 / " + quote.printable().size() + " cells can be placed; "
-                + shortageSummary(quote.budget().missingMaterials(), missingUses)
+    private static String blockedShortage(Plan plan, PlacementBudget.Result budget,
+                                          int remainingUses, boolean usesBypass) {
+        long requiredUses = Math.addExact(budget.requiredUses(),
+                plan.options().activationUses());
+        long missingUses = usesBypass ? 0L : Math.max(0L, requiredUses - remainingUses);
+        return "BLOCKED — The complete print is not in stock: "
+                + shortageSummary(budget.missingMaterials(), missingUses)
                 + ". Nothing changed or spent.";
     }
 

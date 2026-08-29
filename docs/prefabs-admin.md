@@ -11,8 +11,9 @@ Denarii transaction. BuildersWand records only the durable unlock in
 `plugins/BuildersWand/prefab-entitlements.sqlite`.
 
 Every confirmed placement consumes exact inventory feedstock, one normal Use per completed block,
-and the prefab's activation Uses. A later partial continuation pays the activation Uses again.
-There is no free block materialization and no Denarii withdrawal in the prefab placement path.
+and the prefab's activation Uses. Every printable cell and the activation Uses must be affordable
+together before confirmation is offered. There is no free block materialization and no Denarii
+withdrawal in the prefab placement path.
 
 By default, prefab placement also requires a working player-attributed LogBlock connection. The
 plugin has no `/wand undo`; LogBlock is the administrative attribution and rollback path.
@@ -179,7 +180,7 @@ Recommended release sequence:
 3. Reload the catalog.
 4. Grant yourself the design in a staging world.
 5. Test all allowed rotations, an empty placement, an exact rerun, a conflict, an interior
-   obstruction, a resource-short partial placement, and its continuation.
+   obstruction, a shortage refusal, and a successful placement after restocking.
 6. Check LogBlock lookup/rollback attribution under the placing player's name before selling the
    design.
 
@@ -227,11 +228,12 @@ than risk losing or bypassing paid access.
 - Required schematic-air cells must be actual air. Nothing is cleared automatically.
 - The prefab uses exact authored materials from the player's inventory, not the live hotbar
   palette.
-- Resource shortages can place only an explicitly confirmed subset. Blocks are ordered
-  bottom-to-top and then outward from the anchor. Each continuation pays activation Uses again.
+- A resource shortage blocks the entire start. Unaffordable cells preview red, no confirmation is
+  offered, and no material, cell Uses, or activation Uses are spent. After restocking, the player
+  requests a new fully affordable quote.
 - Protection, world border, build height, chunk, entity, wand, inventory, Uses, catalog hash, and
   access checks run again at final confirmation.
-- A hard refusal, stale quote, or zero affordable cells spends nothing.
+- A hard refusal, stale quote, or any resource shortage spends nothing.
 - There is no wand-level undo or refund for completed blocks.
 
 ## LogBlock requirement

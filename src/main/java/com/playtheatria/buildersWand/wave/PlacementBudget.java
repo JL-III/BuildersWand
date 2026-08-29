@@ -13,7 +13,8 @@ import java.util.Objects;
 /**
  * Pure budget simulation shared by preview and commit. Consumed feedstock needs one item per cell;
  * a reusable catalyst needs one retained source item for the plan. Per-cell decisions explain
- * shortages. Callers may admit the stable affordable subset after an explicit partial quote.
+ * shortages. Callers use those decisions to color unavailable preview cells, but placement is
+ * admitted only when {@link Result#fullyAffordable()} is true.
  */
 public final class PlacementBudget {
 
@@ -43,16 +44,6 @@ public final class PlacementBudget {
             return affordableCells == decisions.size();
         }
 
-        /** Stable decision indices used to bind a partial quote to its exact planned cells. */
-        public List<Integer> affordableIndices() {
-            List<Integer> indices = new ArrayList<>(affordableCells);
-            for (int index = 0; index < decisions.size(); index++) {
-                if (decisions.get(index).affordable()) {
-                    indices.add(index);
-                }
-            }
-            return List.copyOf(indices);
-        }
     }
 
     private PlacementBudget() {

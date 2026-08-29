@@ -23,11 +23,9 @@ public final class PluginConfig {
     public final int anchorReach;
     public final float ghostScale;
     public final Color ghostReadyGlow;
-    public final Color ghostPartialGlow;
     public final Color ghostBlockedGlow;
     public final int wandMaxUses;
     public final int waterUsesPerSource;
-    public final int partialConfirmationSeconds;
     /** One shared legality policy for measurement, preview, and final preflight. */
     public final FormLimits formLimits;
     /** Validated server-owned prefab catalog and placement settings. */
@@ -51,12 +49,9 @@ public final class PluginConfig {
         }
         this.ghostScale = (float) config.getDouble("ghost.scale", 0.8);
         this.ghostReadyGlow = color(config, "ghost.ready-glow-rgb", "55FF55");
-        this.ghostPartialGlow = color(config, "ghost.partial-glow-rgb", "FFFF55");
         this.ghostBlockedGlow = color(config, "ghost.blocked-glow-rgb", "FF5555");
         this.wandMaxUses = positive(config.getInt("wand.max-uses", 5000), 5000);
         this.waterUsesPerSource = positive(config.getInt("wand.water-uses-per-source", 3), 3);
-        this.partialConfirmationSeconds = positive(
-                config.getInt("placement.partial-confirmation-seconds", 10), 10);
         this.formLimits = loadFormLimits(config);
         this.prefabSettings = loadPrefabSettings(plugin, config, wandMaxUses);
         boolean legacyRestoreConfig = !config.contains("wand.refill.denarii-per-use", true)

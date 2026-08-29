@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PlacementBudgetTest {
 
     @Test
-    void missingAssignmentDoesNotSubstituteOrRephaseLaterMaterials() {
+    void missingAssignmentMarksExactCellsUnavailableWithoutSubstitutionOrRephasing() {
         List<PlacementBudget.Cost> costs = List.of(
                 new PlacementBudget.Cost(Material.STONE, true, 1),
                 new PlacementBudget.Cost(Material.DIRT, true, 1),
@@ -28,13 +28,12 @@ class PlacementBudgetTest {
                 .map(PlacementBudget.Decision::affordable).toList());
         assertEquals(2, result.affordableCells());
         assertEquals(2L, result.affordableUses());
-        assertEquals(List.of(0, 2), result.affordableIndices());
         assertEquals(Map.of(Material.DIRT, 2), result.missingMaterials());
         assertFalse(result.fullyAffordable());
     }
 
     @Test
-    void useShortageSelectsOnlyCellsWhoseIndividualCostFits() {
+    void useShortageMarksOnlyCellsWhoseIndividualCostDoesNotFit() {
         List<PlacementBudget.Cost> costs = List.of(
                 new PlacementBudget.Cost(Material.WATER_BUCKET, false, 3),
                 new PlacementBudget.Cost(Material.STONE, true, 1),
@@ -49,7 +48,6 @@ class PlacementBudgetTest {
         assertTrue(result.decisions().get(1).affordable());
         assertTrue(result.decisions().get(2).affordable());
         assertEquals(2L, result.affordableUses());
-        assertEquals(List.of(1, 2), result.affordableIndices());
         assertEquals(5L, result.requiredUses());
         assertFalse(result.fullyAffordable());
     }

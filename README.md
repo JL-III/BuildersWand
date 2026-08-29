@@ -1,7 +1,7 @@
 # BuildersWand — Materializer
 
 A Paper survival-building plugin with live previews, inventory-backed textures, custom Uses,
-partial-build confirmation, and reusable WorldEdit-authored prefabs.
+all-or-nothing resource admission, and reusable WorldEdit-authored prefabs.
 
 - **Player guide:** [`PLAYER-GUIDE.md`](PLAYER-GUIDE.md)
 - **Prefab administrator guide:** [`docs/prefabs-admin.md`](docs/prefabs-admin.md)
@@ -62,24 +62,23 @@ uses a lightweight red boundary instead. It shows only the refusal and resize hi
 misleading material or Uses quote. Right-clicking a
 refused preview changes nothing and leaves it anchored so the player can aim closer and resize it.
 
-## Status and partial admission
+## Status and resource admission
 
 Every ordinary form and prefab uses the same status vocabulary:
 
 - **green / READY** — the complete operation is affordable and legal;
-- **yellow / CAUTION or PARTIAL BUILD** — a condition needs attention or the player must explicitly
-  approve an affordable subset; and
-- **red / BLOCKED** — no placement may begin.
+- **red / BLOCKED** — no placement may begin, including when any printable cell lacks its assigned
+  material or Uses; and
+- **yellow supporting details** — non-blocking information that does not change the overall READY
+  or BLOCKED status.
 
-Material assignment occurs before budgeting. If resources are short, the complete plan freezes,
-the exact admitted cells stay green, the remainder turns yellow, and the first commit request
-places nothing. A second bound confirmation within
-`placement.partial-confirmation-seconds` places only that quoted subset. Changed inventory, Uses,
-palette, wand, geometry, world, protection, or target state produces a fresh quote rather than a
-different silent subset.
+Material assignment occurs before budgeting. Every printable cell must be affordable together. If
+resources are short, the assigned cells lacking materials or Uses glow red, the overall operation
+is **BLOCKED**, and nothing is placed or spent. Restocking updates the live preview, but there is no
+subset confirmation, affordable-subset placement, or retained shortage continuation.
 
 Water's higher per-source Use cost is always shown as a separate yellow detail. It does not
-downgrade a fully affordable, legal water plan from green **READY** to **CAUTION**.
+change a fully affordable, legal water plan from green **READY**.
 
 Ordinary admission is anchor-out. Prefab admission is bottom-to-top, then anchor-out. Already-built
 cells are kept without cost. Materials and Uses are spent only for cells that complete.
@@ -137,12 +136,14 @@ SELECTED → ANCHORED → AWAITING CONFIRMATION → PLACING
 The first right-click fixes the anchor and an initial rotation facing the player. Shift-left or
 `/wand prefab rotate` rotates an allowed design; ordinary left-click removes the anchor while
 keeping the selection. A second right-click requests an exact quote. Every prefab—complete or
-partial—requires the opaque clickable confirmation before a wave begins.
+otherwise legal and fully affordable—requires the opaque clickable confirmation before a wave
+begins. An underfunded prefab is blocked and receives no placement confirmation.
 
 Each placement consumes exact block feedstock, normal per-cell Uses, and the metadata activation
-Uses (or `prefabs.default-activation-uses`). The unlock is never consumed. Each separately
-confirmed partial continuation pays activation Uses again. Exact authored states are kept for free;
-different non-replaceable targets and obstructed authored-air clearance fail closed.
+Uses (or `prefabs.default-activation-uses`). The unlock is never consumed. Exact authored states
+are kept for free; different non-replaceable targets and obstructed authored-air clearance fail
+closed. Every remaining printable cell and the activation Uses must be affordable before a rerun
+of an interrupted prefab can start.
 
 Durable unlocks live in `plugins/BuildersWand/prefab-entitlements.sqlite`. An external shop can run
 `/wand prefab grant <player> <id>`, or staff can issue a PDC Blueprint Voucher that is consumed only
@@ -205,7 +206,6 @@ ghost:
   update-ticks: 2
   scale: 0.8
   ready-glow-rgb: "55FF55"
-  partial-glow-rgb: "FFFF55"
   blocked-glow-rgb: "FF5555"
 
 wand:
@@ -215,9 +215,6 @@ wand:
     denarii-per-use: 50
     minimum-uses: 100
     confirmation-seconds: 30
-
-placement:
-  partial-confirmation-seconds: 10
 
 limits:
   max-cells-per-print: 1024

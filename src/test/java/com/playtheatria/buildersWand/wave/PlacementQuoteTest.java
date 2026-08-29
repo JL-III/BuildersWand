@@ -24,25 +24,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PlacementQuoteTest {
 
     @Test
-    void exactBindingIncludesUsesAndWorldStateEvenWhenSubsetWouldStayTheSame() {
+    void exactBindingIncludesUsesAndWorldState() {
         Plan plan = plan();
         List<PlannedCell> printable = plan.targets();
         PlacementBudget.Result budget = PlacementBudget.evaluate(
                 List.of(new PlacementBudget.Cost(Material.STONE, true, 1)),
                 Map.of(Material.STONE, 5), 5, false, false);
-        PlacementQuote original = new PlacementQuote(plan, printable, printable, 0,
+        PlacementQuote original = new PlacementQuote(plan, printable, 0,
                 Map.of(Material.STONE, 5), budget, 5, 10, false, false,
                 "wand-id", 0, List.of("minecraft:air"), 100L);
-        PlacementQuote exact = new PlacementQuote(plan, printable, printable, 0,
+        PlacementQuote exact = new PlacementQuote(plan, printable, 0,
                 Map.of(Material.STONE, 5), budget, 5, 10, false, false,
                 "wand-id", 0, List.of("minecraft:air"), 100L);
-        PlacementQuote issuedLater = new PlacementQuote(plan, printable, printable, 0,
+        PlacementQuote issuedLater = new PlacementQuote(plan, printable, 0,
                 Map.of(Material.STONE, 5), budget, 5, 10, false, false,
                 "wand-id", 0, List.of("minecraft:air"), 500L);
-        PlacementQuote usesChanged = new PlacementQuote(plan, printable, printable, 0,
+        PlacementQuote usesChanged = new PlacementQuote(plan, printable, 0,
                 Map.of(Material.STONE, 5), budget, 6, 10, false, false,
                 "wand-id", 0, List.of("minecraft:air"), 100L);
-        PlacementQuote worldChanged = new PlacementQuote(plan, printable, printable, 0,
+        PlacementQuote worldChanged = new PlacementQuote(plan, printable, 0,
                 Map.of(Material.STONE, 5), budget, 5, 10, false, false,
                 "wand-id", 0, List.of("minecraft:cave_air"), 100L);
 
@@ -55,21 +55,20 @@ class PlacementQuoteTest {
     }
 
     @Test
-    void partialQuoteReportsItsFrozenRemainder() {
+    void shortBudgetCannotBecomeAConfirmationQuote() {
         Plan plan = plan();
         PlacementBudget.Result budget = PlacementBudget.evaluate(
                 List.of(new PlacementBudget.Cost(Material.STONE, true, 1)),
                 Map.of(), 5, false, false);
-        PlacementQuote quote = new PlacementQuote(plan, plan.targets(), List.of(), 0,
-                Map.of(Material.STONE, 0), budget, 5, 10, false, false,
-                "wand-id", 0, List.of("minecraft:air"), 100L);
 
-        assertTrue(quote.partial());
-        assertEquals(1, quote.remainingCells());
+        assertThrows(IllegalArgumentException.class, () -> new PlacementQuote(
+                plan, plan.targets(), 0, Map.of(Material.STONE, 0), budget,
+                5, 10, false, false, "wand-id", 0,
+                List.of("minecraft:air"), 100L));
     }
 
     @Test
-    void prefabTotalsIncludeActivationExactlyOnceForFullAndPartialQuotes() {
+    void prefabTotalIncludesActivationExactlyOnce() {
         Plan plan = prefabPlan(3);
         List<PlannedCell> printable = plan.targets();
         PlacementBudget.Result fullBudget = PlacementBudget.evaluate(
@@ -77,27 +76,11 @@ class PlacementQuoteTest {
                         new PlacementBudget.Cost(Material.STONE, true, 2)),
                 Map.of(Material.STONE, 2),
                 WaveRunner.remainingUsesForCells(7, 3, false), false, false);
-        PlacementQuote full = new PlacementQuote(plan, printable, printable, 0,
+        PlacementQuote full = new PlacementQuote(plan, printable, 0,
                 Map.of(Material.STONE, 2), fullBudget, 7, 10, false, false,
                 "wand-id", 0, List.of("minecraft:air", "minecraft:air"), 100L);
 
-        assertFalse(full.partial());
         assertEquals(7L, full.requiredTotalUses());
-        assertEquals(7L, full.admittedTotalUses());
-
-        PlacementBudget.Result partialBudget = PlacementBudget.evaluate(
-                List.of(new PlacementBudget.Cost(Material.STONE, true, 2),
-                        new PlacementBudget.Cost(Material.STONE, true, 2)),
-                Map.of(Material.STONE, 2),
-                WaveRunner.remainingUsesForCells(5, 3, false), false, false);
-        PlacementQuote partial = new PlacementQuote(plan, printable,
-                List.of(printable.getFirst()), 0, Map.of(Material.STONE, 2), partialBudget,
-                5, 10, false, false, "wand-id", 0,
-                List.of("minecraft:air", "minecraft:air"), 100L);
-
-        assertTrue(partial.partial());
-        assertEquals(7L, partial.requiredTotalUses());
-        assertEquals(5L, partial.admittedTotalUses());
     }
 
     @Test
@@ -110,15 +93,15 @@ class PlacementQuoteTest {
                         new PlacementBudget.Cost(Material.STONE, true, 1)),
                 Map.of(Material.STONE, 2), 7, false, false);
         PlacementQuote original = new PlacementQuote(originalPlan, originalPlan.targets(),
-                originalPlan.targets(), 0, Map.of(Material.STONE, 2), budget,
+                0, Map.of(Material.STONE, 2), budget,
                 10, 10, false, false, "wand-id", 0,
                 List.of("minecraft:air", "minecraft:air"), 100L);
         PlacementQuote changedActivation = new PlacementQuote(changedActivationPlan,
-                changedActivationPlan.targets(), changedActivationPlan.targets(), 0,
+                changedActivationPlan.targets(), 0,
                 Map.of(Material.STONE, 2), budget, 10, 10, false, false,
                 "wand-id", 0, List.of("minecraft:air", "minecraft:air"), 100L);
         PlacementQuote changedContent = new PlacementQuote(changedContentPlan,
-                changedContentPlan.targets(), changedContentPlan.targets(), 0,
+                changedContentPlan.targets(), 0,
                 Map.of(Material.STONE, 2), budget, 10, 10, false, false,
                 "wand-id", 0, List.of("minecraft:air", "minecraft:air"), 100L);
 
@@ -139,13 +122,13 @@ class PlacementQuoteTest {
                 Map.of(Material.STONE, 1), 1, false, false);
 
         PlacementQuote quote = new PlacementQuote(validating, validating.targets(),
-                validating.targets(), 0, Map.of(Material.STONE, 1), budget,
+                0, Map.of(Material.STONE, 1), budget,
                 1, 10, false, false, "wand-id", 0,
                 List.of("minecraft:air", "minecraft:stone"), 100L);
 
         assertEquals(2, quote.worldStates().size());
         assertThrows(IllegalArgumentException.class, () -> new PlacementQuote(
-                validating, validating.targets(), validating.targets(), 0,
+                validating, validating.targets(), 0,
                 Map.of(Material.STONE, 1), budget, 1, 10, false, false,
                 "wand-id", 0, List.of("minecraft:air"), 100L));
     }

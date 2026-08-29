@@ -5,8 +5,6 @@ import com.playtheatria.buildersWand.form.Density;
 import com.playtheatria.buildersWand.form.Orientation;
 import com.playtheatria.buildersWand.form.SurfaceRestriction;
 import org.bukkit.block.BlockFace;
-import com.playtheatria.buildersWand.wave.PlacementQuote;
-import com.playtheatria.buildersWand.wave.Plan;
 import org.bukkit.util.BlockVector;
 
 import java.util.UUID;
@@ -37,13 +35,6 @@ public final class GestureSession {
     public Integer lock2;
     /** Box only: whether the first-locked in-plane axis was lateral (L) rather than away (S/V). */
     public boolean firstAxisLateral;
-    /** Complete immutable plan retained while a partial placement is quoted or continued. */
-    public Plan frozenPlan;
-    /** Exact subset awaiting the player's deliberate second right-click. */
-    public PlacementQuote placementQuote;
-    /** Last hard refusal, retained so the active preview communicates a red blocked state. */
-    public String blockedReason;
-
     public int stage() {
         if (lock1 == null) {
             return 0;

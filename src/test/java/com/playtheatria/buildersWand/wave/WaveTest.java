@@ -16,51 +16,47 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WaveTest {
 
     @Test
-    void activationUsesAreAccountedOnceBeforeAnyCellCompletes() {
+    void activationUsesAreAccountedOnceAndWaveHoldsTheCompleteFundedList() {
         World world = world();
-        PlannedCell admitted = cell(world);
+        PlannedCell first = cell(world, 1);
+        PlannedCell second = cell(world, 2);
+        List<PlannedCell> printable = List.of(first, second);
         PlanOptions options = PlanOptions.prefab("Starter House", "prefab:house:v1:hash",
                 20, List.of(), true, 30);
         WandItems.UseReceipt activationReceipt = new WandItems.UseReceipt(100, 80);
 
         Wave wave = new Wave(UUID.randomUUID(), "Builder", world,
-                MaterialSelectionSnapshot.single(admitted.material()), options,
-                List.of(admitted), 1, Set.of(), false, false, "wand-token", 2,
+                MaterialSelectionSnapshot.single(first.material()), options,
+                printable, 1, Set.of(), false, false, "wand-token",
                 activationReceipt, 20);
 
         assertEquals(20L, wave.usesSpent);
         assertEquals(activationReceipt, wave.activationReceipt);
         assertEquals(20, wave.activationUses);
-        assertTrue(wave.partialAdmission);
-        assertEquals(1, wave.total());
+        assertEquals(printable, wave.printable);
+        assertEquals(2, wave.total());
         assertEquals(0, wave.successfulCells());
     }
 
     @Test
-    void constructorRejectsImpossibleAdmissionAndActivationCounts() {
+    void constructorRejectsNegativeActivationCounts() {
         World world = world();
-        PlannedCell admitted = cell(world);
+        PlannedCell printable = cell(world, 1);
         PlanOptions options = PlanOptions.prefab("Starter House", "prefab:house:v1:hash",
                 20, List.of(), true, 30);
 
         assertThrows(IllegalArgumentException.class, () -> new Wave(
                 UUID.randomUUID(), "Builder", world,
-                MaterialSelectionSnapshot.single(admitted.material()), options,
-                List.of(admitted), 1, Set.of(), false, false, "wand-token", 0,
-                new WandItems.UseReceipt(100, 80), 20));
-        assertThrows(IllegalArgumentException.class, () -> new Wave(
-                UUID.randomUUID(), "Builder", world,
-                MaterialSelectionSnapshot.single(admitted.material()), options,
-                List.of(admitted), 1, Set.of(), false, false, "wand-token", 1,
+                MaterialSelectionSnapshot.single(printable.material()), options,
+                List.of(printable), 1, Set.of(), false, false, "wand-token",
                 null, -1));
     }
 
-    private static PlannedCell cell(World world) {
+    private static PlannedCell cell(World world, int x) {
         PrintMaterial stone = PrintMaterial.block(Material.STONE);
         BlockData data = (BlockData) Proxy.newProxyInstance(BlockData.class.getClassLoader(),
                 new Class<?>[]{BlockData.class}, (proxy, method, arguments) -> switch (method.getName()) {
@@ -69,7 +65,7 @@ class WaveTest {
                     case "clone" -> proxy;
                     default -> null;
                 });
-        return new PlannedCell(new Location(world, 1, 2, 3), stone, data);
+        return new PlannedCell(new Location(world, x, 2, 3), stone, data);
     }
 
     private static World world() {

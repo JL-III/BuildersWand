@@ -300,13 +300,13 @@ public final class PrefabPlacementController
         PlacementQuote prior = session.quote;
         WaveRunner.CommitResult result = waveRunner.commit(player, session.plan, prior);
         switch (result.status()) {
-            case STARTED_COMPLETE, STARTED_PARTIAL -> {
+            case STARTED -> {
                 session.clearQuote();
                 session.blockedReason = null;
                 plugin.getLogger().info("Prefab placement confirmed player=" + player.getUniqueId()
                         + " prefab=" + session.prefabId + " hash=" + session.contentHash
                         + " anchor=" + session.anchor + " rotation=" + session.quarterTurns
-                        + " admitted=" + prior.admitted().size()
+                        + " cells=" + prior.printable().size()
                         + " activation_uses=" + session.plan.options().activationUses());
             }
             case QUOTED -> {
@@ -315,7 +315,8 @@ public final class PrefabPlacementController
             }
             case BLOCKED -> {
                 session.clearQuote();
-                session.blockedReason = result.reason();
+                // Resource stock is recomputed live; never retain a shortage as a frozen job.
+                session.blockedReason = result.adjustableRefusal() ? null : result.reason();
             }
         }
     }
@@ -371,9 +372,9 @@ public final class PrefabPlacementController
             }
             case BLOCKED -> {
                 session.clearQuote();
-                session.blockedReason = result.reason();
+                session.blockedReason = result.adjustableRefusal() ? null : result.reason();
             }
-            case STARTED_COMPLETE, STARTED_PARTIAL -> {
+            case STARTED -> {
                 plugin.getLogger().severe("Prefab plan bypassed mandatory confirmation for "
                         + player.getUniqueId());
                 session.blockedReason = "Internal confirmation policy failure";
@@ -395,46 +396,25 @@ public final class PrefabPlacementController
     private void sendConfirmation(Player player, PrefabDefinition definition,
                                   Session session, boolean refreshed) {
         PlacementQuote quote = session.quote;
-        boolean partial = quote.partial();
-        NamedTextColor color = partial ? NamedTextColor.YELLOW : NamedTextColor.GREEN;
-        String status = partial ? "PARTIAL BUILD" : "READY";
         String prefix = refreshed ? "UPDATED " : "";
-        player.sendMessage(Component.text(prefix + status + " — "
+        player.sendMessage(Component.text(prefix + "READY — "
                 + definition.metadata().name() + " — " + quote.plan().dims().primary() + " × "
-                + quote.plan().dims().secondary() + " × " + quote.plan().dims().tertiary(), color));
-        player.sendMessage(Component.text("Place " + quote.admitted().size()
-                + (partial ? " / " + quote.printable().size() : "") + " blocks; keep "
+                + quote.plan().dims().secondary() + " × " + quote.plan().dims().tertiary(),
+                NamedTextColor.GREEN));
+        player.sendMessage(Component.text("Place " + quote.printable().size()
+                + " blocks; keep "
                 + quote.kept() + " exact matches; 0 conflicts.", NamedTextColor.GRAY));
-        player.sendMessage(Component.text("Uses: " + quote.budget().affordableUses()
+        player.sendMessage(Component.text("Uses: " + quote.budget().requiredUses()
                 + " placement + " + quote.plan().options().activationUses() + " prefab = "
-                + quote.admittedTotalUses()
-                + (quote.usesBypass() ? " (bypassed)" : ""), color));
-        if (partial) {
-            long missingUses = quote.usesBypass() ? 0L
-                    : Math.max(0L, quote.requiredTotalUses() - quote.remainingUses());
-            String missing = quote.budget().missingMaterials().isEmpty()
-                    ? "" : materialSummary(quote.budget().missingMaterials());
-            if (missingUses > 0) {
-                missing += (missing.isEmpty() ? "" : ", ")
-                        + String.format(Locale.US, "%,d", missingUses) + " Uses";
-            }
-            player.sendMessage(Component.text("Missing: "
-                    + (missing.isBlank() ? "additional resources" : missing) + " · "
-                    + quote.remainingCells() + " cells will remain yellow.",
-                    NamedTextColor.YELLOW));
-            player.sendMessage(Component.text(
-                    "Each later continuation is another prefab invocation and pays its activation Uses.",
-                    NamedTextColor.YELLOW));
-        } else {
-            player.sendMessage(Component.text("Materials: "
-                    + materialSummary(quote.budget().requiredMaterials()), NamedTextColor.GRAY));
-        }
+                + quote.requiredTotalUses()
+                + (quote.usesBypass() ? " (bypassed)" : ""), NamedTextColor.GREEN));
+        player.sendMessage(Component.text("Materials: "
+                + materialSummary(quote.budget().requiredMaterials()), NamedTextColor.GRAY));
         player.sendMessage(Component.text(
                 "Make sure the preview and cleared area are correct. There is no wand undo.",
                 NamedTextColor.GRAY));
-        Component place = Component.text(partial
-                        ? "[PLACE " + quote.admitted().size() + " AVAILABLE]" : "[PLACE]",
-                color).decorate(TextDecoration.BOLD)
+        Component place = Component.text("[PLACE]", NamedTextColor.GREEN)
+                .decorate(TextDecoration.BOLD)
                 .clickEvent(ClickEvent.runCommand("/wand prefab confirm " + session.token));
         Component cancel = Component.text(" [CANCEL]", NamedTextColor.RED)
                 .clickEvent(ClickEvent.runCommand("/wand prefab cancel"));

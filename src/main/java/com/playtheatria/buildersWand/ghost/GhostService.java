@@ -15,7 +15,6 @@ import com.playtheatria.buildersWand.wand.PlacementUseCost;
 import com.playtheatria.buildersWand.wand.UseCounter;
 import com.playtheatria.buildersWand.wave.Feedstock;
 import com.playtheatria.buildersWand.wave.PlacementBudget;
-import com.playtheatria.buildersWand.wave.PlacementQuote;
 import com.playtheatria.buildersWand.wave.PlacementRules;
 import com.playtheatria.buildersWand.wave.Plan;
 import com.playtheatria.buildersWand.wave.PlannedCell;
@@ -48,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.UUID;
 
 /**
@@ -69,6 +69,7 @@ public final class GhostService {
     private static final int PREFAB_PREFLIGHT_CACHE_TICKS = 10;
     private static final TextColor HINT_COLOR = TextColor.color(0x55, 0xFF, 0xFF); // aqua
     private static final Color ANCHOR_GLOW = Color.fromRGB(0x55FFFF);
+    private static final Color PREFAB_ORIGIN_GLOW = Color.fromRGB(0xFFFF55);
     private static final float ANCHOR_SCALE = 0.24f;
 
     private final JavaPlugin plugin;
@@ -181,7 +182,7 @@ public final class GhostService {
             }
             if (waterEvaporates(plan)) {
                 Affordability affordable = blocked(affordability(player, plan, creative,
-                        usesBypass, wandUses, null, null), "Water evaporates in this world");
+                        usesBypass, wandUses, null), "Water evaporates in this world");
                 syncGhosts(player, plan, affordable);
                 sendPulsedStatus(player, "BLOCKED — Water evaporates in this world.",
                         NamedTextColor.RED);
@@ -190,7 +191,7 @@ public final class GhostService {
             String uses = usesBypass ? "Uses bypassed" : "Uses " + wandUses.remaining()
                     + "/" + wandUses.maximum();
             Affordability affordable = affordability(player, plan, creative, usesBypass, wandUses,
-                    null, null);
+                    null);
             syncGhosts(player, plan, affordable);
             if (affordable.status() == PreviewStatus.BLOCKED) {
                 String reason = affordable.blockedReason() == null
@@ -225,7 +226,7 @@ public final class GhostService {
         syncAnchorGhost(player, plan.get());
         if (waterEvaporates(plan)) {
             Affordability affordable = affordability(player, plan, creative,
-                    usesBypass, wandUses, session.placementQuote, session.blockedReason);
+                    usesBypass, wandUses, null);
             // A limit refusal is the more actionable problem and needs the bounded red outline.
             // Do not relabel it as evaporation while retaining a contradictory TOO LARGE status.
             if (affordable.limitKind() == null) {
@@ -236,7 +237,7 @@ public final class GhostService {
             return;
         }
         Affordability affordable = affordability(player, plan, creative, usesBypass, wandUses,
-                session.placementQuote, session.blockedReason);
+                null);
         syncGhosts(player, plan, affordable);
         player.sendActionBar(actionBar(session, plan.get(), affordable, creative));
     }
@@ -267,7 +268,7 @@ public final class GhostService {
         String retained = state.blockedReason().isBlank()
                 ? hardFailure.orElse(null) : state.blockedReason();
         Affordability affordable = affordability(player, Optional.of(plan), creative, usesBypass,
-                uses, state.quote(), retained, true);
+                uses, retained, true);
         syncGhosts(player, Optional.of(plan), affordable);
         player.sendActionBar(prefabActionBar(state, affordable));
     }
@@ -277,7 +278,6 @@ public final class GhostService {
         NamedTextColor color = statusColor(affordable.status());
         String status = statusLabel(affordable.status());
         int printable = affordable.printable().size();
-        int admitted = affordable.budget().affordableCells();
         Component line = Component.text(status + " — "
                 + preview.definition().metadata().name() + " · "
                 + (preview.quarterTurns() * 90) + "° · ", color);
@@ -285,9 +285,6 @@ public final class GhostService {
             line = line.append(Component.text(affordable.blockedReason() == null
                     ? "nothing can begin" : affordable.blockedReason().replace("BLOCKED — ", ""),
                     NamedTextColor.RED));
-        } else if (affordable.status() == PreviewStatus.PARTIAL) {
-            line = line.append(Component.text("place " + admitted + " / " + printable
-                    + " now", NamedTextColor.YELLOW));
         } else {
             line = line.append(Component.text(printable + " cells ready", NamedTextColor.GREEN));
         }
@@ -297,7 +294,9 @@ public final class GhostService {
                 ? "Uses bypassed"
                 : Math.addExact(affordable.budget().affordableUses(),
                         preview.plan().orElseThrow().options().activationUses()) + " Uses";
-        String hint = preview.quote() == null
+        String hint = affordable.resourceShortage()
+                ? "Restock every red cell before requesting confirmation · LEFT re-anchors"
+                : preview.quote() == null
                 ? "RIGHT requests confirmation · SHIFT-LEFT rotates · LEFT re-anchors"
                 : "Use PLACE in chat · /wand prefab cancel cancels";
         return line.append(Component.text(" · " + uses + " · " + hint,
@@ -326,18 +325,20 @@ public final class GhostService {
 
     enum PreviewStatus {
         READY,
-        CAUTION,
-        PARTIAL,
         BLOCKED
     }
 
-    /** A premium cost notice is informational and does not downgrade an affordable plan. */
-    static PreviewStatus previewStatus(boolean hardBlocked, boolean partial,
+    /** Premium costs are informational; any actual shortage blocks the complete operation. */
+    static PreviewStatus previewStatus(boolean hardBlocked, boolean fullyAffordable,
                                        boolean ignoredInformationalCostNotice) {
-        if (hardBlocked) {
-            return PreviewStatus.BLOCKED;
-        }
-        return partial ? PreviewStatus.PARTIAL : PreviewStatus.READY;
+        return hardBlocked || !fullyAffordable ? PreviewStatus.BLOCKED : PreviewStatus.READY;
+    }
+
+    /** A shortage colors only unavailable cells red; hard failures color the entire plan red. */
+    static boolean previewCellBlocked(PreviewStatus status, boolean resourceShortage,
+                                      PlacementBudget.Decision decision) {
+        return status == PreviewStatus.BLOCKED
+                && (!resourceShortage || !decision.affordable());
     }
 
     /** Explain an anchored plan failure without confusing valid palettes with missing material. */
@@ -360,27 +361,26 @@ public final class GhostService {
                                  Map<org.bukkit.Material, Integer> availableMaterials,
                                  PlacementBudget.Result budget, int uses, boolean usesBypass,
                                  PreviewStatus status, String blockedReason,
-                                 LimitKind limitKind) {
+                                 boolean resourceShortage, LimitKind limitKind) {
     }
 
     /** Simulate each assigned material and variable Use cost in exact emission order. */
     private Affordability affordability(Player player, Optional<Plan> plan, boolean creative,
                                         boolean usesBypass, UseCounter.State wandUses,
-                                        PlacementQuote pendingQuote, String blockedReason) {
-        return affordability(player, plan, creative, usesBypass, wandUses, pendingQuote,
-                blockedReason, false);
+                                        String blockedReason) {
+        return affordability(player, plan, creative, usesBypass, wandUses, blockedReason, false);
     }
 
     private Affordability affordability(Player player, Optional<Plan> plan, boolean creative,
                                         boolean usesBypass, UseCounter.State wandUses,
-                                        PlacementQuote pendingQuote, String blockedReason,
+                                        String blockedReason,
                                         boolean hardPreflightAlreadyChecked) {
         if (plan.isEmpty()) {
             PlacementBudget.Result empty = PlacementBudget.evaluate(List.of(), Map.of(),
                     wandUses.remaining(), creative, usesBypass);
             return new Affordability(List.of(), 0, List.of(), Map.of(), empty,
                     usesBypass ? Integer.MAX_VALUE : wandUses.remaining(), usesBypass,
-                    PreviewStatus.BLOCKED, "No valid plan", null);
+                    PreviewStatus.BLOCKED, "No valid plan", false, null);
         }
         if (plan.get().options().kind()
                 == com.playtheatria.buildersWand.wave.PlanOptions.Kind.ORDINARY) {
@@ -423,24 +423,6 @@ public final class GhostService {
                 && (blockedReason == null || blockedReason.isBlank())) {
             blockedReason = waveRunner.previewHardFailure(player, plan.get()).orElse(null);
         }
-        if (pendingQuote != null && pendingQuote.plan().equals(plan.get())) {
-            List<CellAffordability> cells = new java.util.ArrayList<>(pendingQuote.printable().size());
-            for (int index = 0; index < pendingQuote.printable().size(); index++) {
-                cells.add(new CellAffordability(pendingQuote.printable().get(index),
-                        pendingQuote.budget().decisions().get(index)));
-            }
-            boolean current = quoteStillCurrent(player, pendingQuote, wandUses, creative, usesBypass);
-            boolean hardBlocked = blockedReason != null && !blockedReason.isBlank();
-            PreviewStatus status = previewStatus(!current || hardBlocked,
-                    pendingQuote.partial(), containsWater(plan.get()));
-            return new Affordability(List.copyOf(cells), pendingQuote.kept(), List.of(),
-                    pendingQuote.availableMaterials(), pendingQuote.budget(),
-                    pendingQuote.usesBypass() ? Integer.MAX_VALUE : pendingQuote.remainingUses(),
-                    pendingQuote.usesBypass(), status,
-                    hardBlocked ? blockedReason
-                            : current ? null : "quote expired or changed; right-click to refresh",
-                    null);
-        }
         Map<org.bukkit.Material, Integer> available = new LinkedHashMap<>();
         for (PlannedCell target : printable) {
             available.computeIfAbsent(target.material().sourceItem(), material ->
@@ -457,9 +439,10 @@ public final class GhostService {
         }
         PreviewStatus status;
         String reason = blockedReason;
+        boolean resourceShortage = false;
         if (reason != null && !reason.isBlank() || !conflicts.isEmpty()
-                || printable.isEmpty() || budget.affordableCells() == 0) {
-            status = previewStatus(true, false, containsWater(plan.get()));
+                || printable.isEmpty()) {
+            status = previewStatus(true, true, containsWater(plan.get()));
             if (reason == null || reason.isBlank()) {
                 if (!conflicts.isEmpty()) {
                     reason = conflicts.size() + " conflicting cell"
@@ -468,17 +451,20 @@ public final class GhostService {
                     reason = plan.get().options().prefab()
                             ? "this prefab is already complete at that anchor"
                             : "every target is already built or occupied";
-                } else {
-                    reason = "0 / " + printable.size() + " cells can be placed";
                 }
             }
+        } else if (!budget.fullyAffordable()) {
+            status = previewStatus(false, false, containsWater(plan.get()));
+            resourceShortage = true;
+            reason = shortageReason(budget, wandUses.remaining(),
+                    plan.get().options().activationUses(), usesBypass);
         } else {
-            status = previewStatus(false, !budget.fullyAffordable(), containsWater(plan.get()));
+            status = previewStatus(false, true, containsWater(plan.get()));
         }
         return new Affordability(List.copyOf(cells), kept, List.copyOf(conflicts),
                 Map.copyOf(available), budget,
                 usesBypass ? Integer.MAX_VALUE : wandUses.remaining(), usesBypass, status, reason,
-                null);
+                resourceShortage, null);
     }
 
     private Affordability limitBlocked(UseCounter.State wandUses, boolean creative,
@@ -488,7 +474,7 @@ public final class GhostService {
         return new Affordability(List.of(), 0, List.of(), Map.of(), empty,
                 usesBypass ? Integer.MAX_VALUE : wandUses.remaining(), usesBypass,
                 PreviewStatus.BLOCKED, refusal.message(),
-                refusal.violation().orElseThrow().kind());
+                false, refusal.violation().orElseThrow().kind());
     }
 
     private PlacementBudget.Cost costOf(PlannedCell target) {
@@ -497,74 +483,30 @@ public final class GhostService {
                 PlacementUseCost.perCell(target.material(), config.waterUsesPerSource));
     }
 
-    /** Cheap local stale check; authoritative protection and world checks still run on commit. */
-    private boolean quoteStillCurrent(Player player, PlacementQuote quote, UseCounter.State wandUses,
-                                      boolean creative, boolean usesBypass) {
-        int confirmationSeconds = quote.plan().options().alwaysConfirm()
-                ? quote.plan().options().confirmationSeconds()
-                : config.partialConfirmationSeconds;
-        if (quote.expiredAt(System.nanoTime(), confirmationSeconds)
-                || quote.creative() != creative
-                || quote.usesBypass() != usesBypass
-                || quote.remainingUses() != wandUses.remaining()
-                || quote.maximumUses() != wandUses.maximum()) {
-            return false;
+    private static String shortageReason(PlacementBudget.Result budget, int remainingUses,
+                                         int activationUses, boolean usesBypass) {
+        long totalUses = Math.addExact(budget.requiredUses(), activationUses);
+        long missingUses = usesBypass ? 0L : Math.max(0L, totalUses - remainingUses);
+        StringJoiner missing = new StringJoiner(" and ");
+        if (!budget.missingMaterials().isEmpty()) {
+            StringJoiner materials = new StringJoiner(", ");
+            budget.missingMaterials().forEach((material, count) -> materials.add(count + " "
+                    + WandItems.materialDisplayName(material)));
+            missing.add("restock " + materials);
         }
-        ItemStack wand = player.getInventory().getItemInOffHand();
-        if (!java.util.Objects.equals(quote.wandId(), wandItems.identity(wand).wandId())
-                || quote.rotation() != wandItems.getRotation(wand)) {
-            return false;
+        if (missingUses > 0L) {
+            missing.add("restore " + missingUses + " Uses");
         }
-        if (quote.plan().options().livePaletteRequired()
-                && wandItems.materialSelection(player).snapshot()
-                .filter(quote.plan().materialSelection()::equals).isEmpty()) {
-            return false;
-        }
-        List<String> worldStates = new java.util.ArrayList<>();
-        quote.plan().targets().stream()
-                .map(target -> target.location().getBlock().getBlockData().getAsString())
-                .forEach(worldStates::add);
-        quote.plan().options().clearanceCells().stream()
-                .map(cell -> quote.plan().world().getBlockAt(cell.getBlockX(), cell.getBlockY(),
-                        cell.getBlockZ()).getBlockData().getAsString())
-                .forEach(worldStates::add);
-        quote.plan().options().validationCells().stream()
-                .map(cell -> quote.plan().world().getBlockAt(cell.location().getBlockX(),
-                        cell.location().getBlockY(), cell.location().getBlockZ())
-                        .getBlockData().getAsString())
-                .forEach(worldStates::add);
-        if (!quote.worldStates().equals(worldStates)) {
-            return false;
-        }
-        List<PlannedCell> printable = quote.plan().targets().stream()
-                .filter(target -> PlacementRules.isPrintable(
-                        target.location().getBlock(), target.blockData()))
-                .toList();
-        if (!quote.printable().equals(printable)
-                || quote.kept() != quote.plan().targets().size() - printable.size()) {
-            return false;
-        }
-        Map<org.bukkit.Material, Integer> available = new LinkedHashMap<>();
-        for (PlannedCell target : printable) {
-            available.computeIfAbsent(target.material().sourceItem(), material ->
-                    Feedstock.available(player.getInventory(), target.material(), wandItems));
-        }
-        int cellUseBalance = WaveRunner.remainingUsesForCells(wandUses.remaining(),
-                quote.plan().options().activationUses(), usesBypass);
-        PlacementBudget.Result budget = PlacementBudget.evaluate(
-                printable.stream().map(this::costOf).toList(), available,
-                cellUseBalance, creative, usesBypass);
-        List<PlannedCell> admitted = budget.affordableIndices().stream().map(printable::get).toList();
-        return quote.availableMaterials().equals(available)
-                && quote.budget().equals(budget)
-                && quote.admitted().equals(admitted);
+        return "complete print requires "
+                + (missing.length() == 0 ? "more resources" : missing)
+                + "; nothing will be placed";
     }
 
     private static Affordability blocked(Affordability affordability, String reason) {
         return new Affordability(affordability.printable(), affordability.kept(),
                 affordability.conflicts(), affordability.availableMaterials(),
                 affordability.budget(), affordability.uses(), affordability.usesBypass(),
-                PreviewStatus.BLOCKED, reason, null);
+                PreviewStatus.BLOCKED, reason, false, null);
     }
 
     /**
@@ -646,14 +588,14 @@ public final class GhostService {
         BlockDisplay display = current.get(key);
         if (display == null || !display.isValid()) {
             current.put(key, spawn(player, location, origin.get().blockData(),
-                    config.ghostPartialGlow));
+                    PREFAB_ORIGIN_GLOW));
         } else {
             if (!display.getBlock().getAsString().equals(
                     origin.get().blockData().getAsString())) {
                 display.setBlock(origin.get().blockData());
             }
-            if (!config.ghostPartialGlow.equals(display.getGlowColorOverride())) {
-                display.setGlowColorOverride(config.ghostPartialGlow);
+            if (!PREFAB_ORIGIN_GLOW.equals(display.getGlowColorOverride())) {
+                display.setGlowColorOverride(PREFAB_ORIGIN_GLOW);
             }
         }
         current.entrySet().removeIf(entry -> {
@@ -689,13 +631,8 @@ public final class GhostService {
             BlockData previewData = target.material().isWater()
                     ? target.material().previewBlock().createBlockData()
                     : target.blockData();
-            Color glow = switch (affordable.status()) {
-                case READY -> config.ghostReadyGlow;
-                case CAUTION -> config.ghostPartialGlow;
-                case PARTIAL -> cell.decision().affordable()
-                        ? config.ghostReadyGlow : config.ghostPartialGlow;
-                case BLOCKED -> config.ghostBlockedGlow;
-            };
+            Color glow = previewCellBlocked(affordable.status(), affordable.resourceShortage(),
+                    cell.decision()) ? config.ghostBlockedGlow : config.ghostReadyGlow;
             BlockDisplay existing = current.get(key);
             if (existing == null || !existing.isValid()) {
                 current.put(key, spawn(player, loc, previewData, glow));
@@ -899,7 +836,6 @@ public final class GhostService {
     private static NamedTextColor statusColor(PreviewStatus status) {
         return switch (status) {
             case READY -> NamedTextColor.GREEN;
-            case CAUTION, PARTIAL -> NamedTextColor.YELLOW;
             case BLOCKED -> NamedTextColor.RED;
         };
     }
@@ -907,8 +843,6 @@ public final class GhostService {
     private static String statusLabel(PreviewStatus status) {
         return switch (status) {
             case READY -> "READY";
-            case CAUTION -> "CAUTION";
-            case PARTIAL -> "PARTIAL BUILD";
             case BLOCKED -> "BLOCKED";
         };
     }
@@ -933,17 +867,12 @@ public final class GhostService {
                     .append(Component.text(" · " + hint, NamedTextColor.AQUA));
         }
         int printable = affordable.printable().size();
-        int admitted = affordable.budget().affordableCells();
         NamedTextColor statusColor = switch (affordable.status()) {
             case READY -> NamedTextColor.GREEN;
-            case CAUTION -> NamedTextColor.YELLOW;
-            case PARTIAL -> NamedTextColor.YELLOW;
             case BLOCKED -> NamedTextColor.RED;
         };
         String label = switch (affordable.status()) {
             case READY -> "READY";
-            case CAUTION -> "CAUTION";
-            case PARTIAL -> "PARTIAL BUILD";
             case BLOCKED -> "BLOCKED";
         };
         Component result = Component.text(label + " — ", statusColor)
@@ -953,18 +882,14 @@ public final class GhostService {
                         ? " " + session.surfaceRestriction.name() : "")
                         + " " + dims.primary() + "×"
                         + dims.secondary() + "×" + dims.tertiary() + " · ", NamedTextColor.GRAY));
-        if (affordable.status() == PreviewStatus.READY
-                || affordable.status() == PreviewStatus.CAUTION) {
+        if (affordable.status() == PreviewStatus.READY) {
             result = result.append(Component.text(printable + " cells ready", NamedTextColor.GREEN));
-        } else if (affordable.status() == PreviewStatus.PARTIAL) {
-            result = result.append(Component.text("place " + admitted + " / " + printable
-                    + " · " + (printable - admitted) + " remain", NamedTextColor.YELLOW));
         } else {
             String reason = affordable.blockedReason() == null
                     ? "nothing can be placed" : affordable.blockedReason().replace("BLOCKED — ", "");
             result = result.append(Component.text(reason, NamedTextColor.RED));
         }
-        if (affordable.status() != PreviewStatus.BLOCKED && containsWater(plan)) {
+        if (affordable.status() == PreviewStatus.READY && containsWater(plan)) {
             result = result.append(Component.text(" · water costs "
                     + config.waterUsesPerSource + " Uses/source", NamedTextColor.YELLOW));
         }
@@ -974,10 +899,8 @@ public final class GhostService {
         result = result.append(Component.text(" · " + uses, NamedTextColor.GRAY));
         String actionHint;
         if (affordable.status() == PreviewStatus.BLOCKED) {
-            actionHint = session.placementQuote != null
-                    ? "RIGHT refreshes quote · LEFT cancels"
-                    : session.frozenPlan != null
-                    ? "RIGHT retries · LEFT cancels"
+            actionHint = affordable.resourceShortage()
+                    ? "Restock every red cell or resize · LEFT cancels"
                     : "Fix the problem or LEFT cancels";
         } else {
             actionHint = hint(session);
@@ -990,15 +913,8 @@ public final class GhostService {
     }
 
     private static String hint(GestureSession session) {
-        if (session.placementQuote != null) {
-            return session.placementQuote.partial()
-                    ? "RIGHT confirms PLACE AVAILABLE · LEFT cancels"
-                    : "RIGHT confirms PLACE · LEFT cancels";
-        }
         if (session.stage() >= session.form.lockStages()) {
-            return session.frozenPlan == null
-                    ? "RIGHT requests print · LEFT cancels"
-                    : "RIGHT quotes remaining · LEFT cancels";
+            return "RIGHT requests print · LEFT cancels";
         }
         String locks = switch (session.form) {
             case CYLINDER, SPHERE -> "RIGHT locks radius";

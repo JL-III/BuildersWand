@@ -8,13 +8,12 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Immutable resource quote for one frozen plan. A confirmation is valid only when a freshly
- * evaluated quote has the same binding as this one; this prevents a second click from silently
- * placing a different subset after inventory, Uses, wand state, or the world changes.
+ * Immutable confirmation quote for one fully affordable frozen plan. A confirmation is valid only
+ * when a freshly evaluated quote has the same binding as this one; this prevents a click from
+ * placing after inventory, Uses, wand state, or the world changes.
  */
 public record PlacementQuote(Plan plan, List<PlannedCell> printable,
-                             List<PlannedCell> admitted, int kept,
-                             Map<Material, Integer> availableMaterials,
+                             int kept, Map<Material, Integer> availableMaterials,
                              PlacementBudget.Result budget, int remainingUses, int maximumUses,
                              boolean creative, boolean usesBypass,
                              String wandId, int rotation, List<String> worldStates,
@@ -23,7 +22,6 @@ public record PlacementQuote(Plan plan, List<PlannedCell> printable,
     public PlacementQuote {
         Objects.requireNonNull(plan, "plan");
         printable = List.copyOf(printable);
-        admitted = List.copyOf(admitted);
         if (kept < 0) {
             throw new IllegalArgumentException("kept cannot be negative");
         }
@@ -46,25 +44,14 @@ public record PlacementQuote(Plan plan, List<PlannedCell> printable,
         if (budget.decisions().size() != printable.size()) {
             throw new IllegalArgumentException("budget decisions must match printable cells");
         }
-        if (admitted.size() != budget.affordableCells()) {
-            throw new IllegalArgumentException("admitted cells must match the budget");
+        if (!budget.fullyAffordable()) {
+            throw new IllegalArgumentException(
+                    "a placement confirmation requires every printable cell to be affordable");
         }
-    }
-
-    public boolean partial() {
-        return admitted.size() < printable.size();
-    }
-
-    public int remainingCells() {
-        return printable.size() - admitted.size();
     }
 
     public long requiredTotalUses() {
         return Math.addExact(budget.requiredUses(), plan.options().activationUses());
-    }
-
-    public long admittedTotalUses() {
-        return Math.addExact(budget.affordableUses(), plan.options().activationUses());
     }
 
     /** Exact confirmation binding, deliberately excluding only the monotonic issue time. */
@@ -72,7 +59,6 @@ public record PlacementQuote(Plan plan, List<PlannedCell> printable,
         return other != null
                 && plan.equals(other.plan)
                 && printable.equals(other.printable)
-                && admitted.equals(other.admitted)
                 && kept == other.kept
                 && availableMaterials.equals(other.availableMaterials)
                 && budget.equals(other.budget)

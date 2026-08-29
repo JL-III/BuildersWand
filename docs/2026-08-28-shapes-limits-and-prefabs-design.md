@@ -5,7 +5,8 @@
 > **Date:** 2026-08-28
 >
 > This document records the product direction and safety/economy contract implemented in this
-> worktree. Sections describing later expressive shapes remain future direction.
+> worktree, including the 2026-08-29 all-or-nothing affordability amendment. Sections describing
+> later expressive shapes remain future direction.
 
 ## 1. Outcome
 
@@ -33,9 +34,9 @@ actual block still needs feedstock, Uses, permission, a safe target, and a visib
 | Prefab purchase | The external shop owns the Denarii transaction; BuildersWand stores only the resulting unlock. |
 | One-shot or reusable? | **Reusable.** Every placement pays normal cell Uses plus a configurable prefab activation cost. |
 | Free prefab materials? | **No.** The player supplies the exact authored materials, preventing `/sell hand` materialization exploits. |
-| Missing materials or Uses | **Confirm a partial build for every form.** Keep the full intended plan visible and place only the explicitly quoted affordable cells. |
-| Partial texture behavior | Never substitute another palette material or recompute the pattern. A missing material leaves its assigned cells unbuilt. |
-| Status colors | Use the same semantics everywhere: **green = ready**, **yellow = caution/partial**, and **red = blocked/failure**. |
+| Missing materials or Uses | **Block the entire start for every form.** Every printable cell must be affordable together; no subset placement is offered. |
+| Texture shortage behavior | Never substitute another palette material or recompute the pattern. A missing material makes its assigned cells red and blocks the operation. |
+| Status colors | Use the same semantics everywhere: **green = ready**, **yellow = supporting detail**, and **red = blocked/failure**, including resource shortages. |
 | Confirmation | Required for every prefab placement and bound to the exact preview, inventory quote, wand, location, and rotation. |
 | Prefab authoring anchor | Ignore WorldEdit's stored copy offset. Infer the lower-left corner of the canonical front face after an optional YAML source rotation. |
 | Obstructions | Existing exact matches are kept. A conflicting non-replaceable block or obstructed authored-air clearance refuses the placement. Nothing is cleared as terrain. |
@@ -78,10 +79,11 @@ Box, Cylinder, and Sphere/Capsule implement a persisted Shell/Solid preference. 
 performs a bounded exact-BlockData traversal and binds the source cells so a changed face cannot be
 placed from a stale preview.
 
-Every form now uses exact partial admission. Material assignment happens before affordability, the
-quoted subset is bound to the full plan and live inputs, and a resource-short operation requires a
-second explicit confirmation. Prefabs use the same quote/budget/wave path with authored materials,
-strict clearance, activation Uses, and mandatory confirmation even when fully affordable.
+Every form now uses exact all-or-nothing resource admission. Material assignment happens before
+affordability, and every printable cell must have its assigned feedstock and Use cost before a wave
+can begin. A shortage blocks without placing or spending. Prefabs use the same full-plan budget
+with authored materials, strict clearance, activation Uses, and mandatory confirmation after the
+complete operation becomes affordable.
 
 `PlacementLogger` includes a runtime adapter to LogBlock's player actor and place/replace consumer
 API. Ordinary forms retain optional logging. With `prefabs.require-logblock: true`, prefab preflight
@@ -138,12 +140,13 @@ toward progressive placement:
   and the maintainers confirmed it as a bug in
   [Create issue #9543](https://github.com/Creators-of-Create/Create/issues/9543).
 
-The consistent player expectation is not “every operation must be atomic.” It is that the preview
-and command must tell the truth. Progressive work is useful when it can be continued; unexpected
-holes after an apparently complete quote feel broken. BuildersWand should therefore retain the
-utility of partial placement while making incompleteness an explicit choice. Community reports
-are anecdotal rather than a controlled survey, but they consistently object to a mismatch between
-the promised plan and the result, not to resumable partial work itself.
+Prior art demonstrates that progressive placement can work, but it also makes shortages, holes,
+and continuation state part of the core interaction. BuildersWand deliberately chooses the simpler
+survival contract: the preview and result must match completely at wave admission. Every printable
+cell is budgeted before the first placement, missing assignments are red, and any resource shortage
+blocks the entire start. Players can resize or restock without learning a separate continuation
+workflow. Mid-wave interruption and entity skips remain runtime safety outcomes, not economic
+permission to begin an underfunded build.
 
 ## 5. Primitive catalog
 
@@ -218,53 +221,32 @@ cycle between:
 The source search must stop at the configured cell, span, and chunk limits. It may match exact
 BlockData by default; a later “same material” option can deliberately ignore orientation.
 
-### 5.6 Universal resource-shortage interaction
+### 5.6 Universal all-or-nothing affordability
 
-Resource shortage behavior is shared by every ordinary form and every prefab. Prefabs are not a
-special exception.
+Resource admission is shared by every ordinary form and every prefab. Prefabs are not an economic
+exception, although they retain their separate confirmation step.
 
-When the player can afford the full plan, ordinary forms keep their normal direct commit and
-prefabs keep their normal placement confirmation. When blocks or Uses are short:
+1. Material assignment happens for the complete geometry before affordability. If an oak-assigned
+   cell cannot be supplied, that exact cell glows **red**; stone never substitutes for it and the
+   deterministic texture never rephases.
+2. The complete printable set and its full Use cost are evaluated together. All assigned blocks
+   and Uses must be available before anything can begin.
+3. A shortage makes the overall operation red **BLOCKED** and reports the exact missing materials
+   and Uses. Cells lacking their assigned resources are red in the normal preview. Nothing is
+   placed, removed from inventory, or deducted from the wand.
+4. Ordinary forms offer no shortage confirmation. Prefabs offer their mandatory **PLACE**
+   confirmation only after the complete printable plan plus activation Uses is affordable.
+5. Restocking or restoring Uses recomputes the live preview. There is no frozen placement subset,
+   subset confirmation, or retained shortage continuation.
+6. Final commit or prefab confirmation rechecks inventory, Uses, wand, palette or authored plan,
+   world, anchor, dimensions, rotation, protection, and target state. A changed input either
+   remains blocked or produces a fresh complete plan; it never admits a different subset.
 
-1. The commit request places nothing and freezes the complete plan, anchor, dimensions, rotation,
-   and palette assignment.
-2. The full intended geometry remains visible. Cells quoted to place now glow **green** and cells
-   that will remain because of resources glow **yellow**.
-3. The action bar and chat say **PARTIAL BUILD** in yellow and quote the exact affordable and total
-   cells, Uses, and material shortages. For example:
-
-   ```text
-   PARTIAL BUILD — can place 83 / 120; 37 will remain
-   Missing: Stone ×24, Oak Planks ×13 · Uses: 83 available / 120 needed
-   Right-click again to PLACE AVAILABLE, or left-click to cancel.
-   ```
-
-4. Only a second deliberate confirmation admits the quoted affordable subset. If no cell is
-   affordable, no confirmation is offered and nothing is spent.
-5. The final recheck must match the quote exactly. If inventory, Uses, wand, palette, world,
-   anchor, dimensions, rotation, protection, or target state changed, expire the quote and show a
-   new one; never silently place a different subset.
-6. After a partial wave, keep the frozen plan and remaining ghost anchored. The player can restock
-   and right-click to quote the remaining cells, or cancel deliberately. Logout, world change, or
-   session expiry may discard this temporary plan; it is not a saved swatch.
-
-Palette assignment always happens for the complete geometry before affordability. If an oak-
-assigned cell cannot be supplied, that exact cell remains yellow and unbuilt; stone does not replace
-it, and later cells do not rephase. Ordinary-form admission proceeds from the anchor outward with
-fixed coordinate tie-breakers. Prefabs proceed bottom-to-top and then anchor-out so foundations are
-built before upper trim. The full mapping and priority order must be shared by preview, quote,
-commit, and rerun.
-
-Materials and Uses are charged only for cells successfully placed. Resource-skipped cells, kept
-cells, and failed cells cost nothing. A partial attempt records its actual cells and Uses in global
-totals but does not increment completed-print or largest-completed-print statistics. Water follows
-the same rule: its retained bucket remains a catalyst, each admitted source must afford the full
-configured per-source Use cost, and zero affordable sources spend nothing.
-
-“Partial” in this section means economic shortage only. It does not turn a protection denial,
-prefab conflict, illegal dimension, unsafe clearance volume, or stale confirmation into permission
-to build around the failure. Existing entity defer/skip behavior remains a separately reported
-safety outcome.
+Once a fully funded wave starts, materials and Uses are still charged per successfully completed
+cell so a runtime failure can leave all unprocessed resources untouched. Kept cells and failed or
+entity-skipped cells cost nothing. Water follows the same admission rule: the bucket remains a
+catalyst, and the wand must afford the configured per-source Use cost for every printable source
+before the wave starts.
 
 ### 5.7 Unified status colors and language
 
@@ -274,12 +256,12 @@ and completion messages. Use Minecraft's bright named colors consistently:
 | State | Color | Meaning | Preview behavior | Text label |
 |---|---|---|---|---|
 | Ready | Green (`§a`, `#55FF55`) | The quoted plan can proceed completely. | Every cell that will be placed glows green. | **READY** |
-| Caution / partial | Yellow (`§e`, `#FFFF55`) | The operation can proceed, but only partially, or a condition requires the player's attention. | A caution preview glows yellow; for a partial build, cells that can place remain green and unavailable cells glow yellow. | **PARTIAL BUILD** or **CAUTION** |
-| Blocked / failure | Red (`§c`, `#FF5555`) | Nothing may begin: zero affordable cells, protection denial, conflict, illegal geometry, unsafe clearance, stale quote, or another hard failure. | Printable/conflicting cells glow red for ordinary hard failures; whole-operation limit refusals use the special presentation below. | **BLOCKED** |
+| Supporting detail | Yellow (`§e`, `#FFFF55`) | Non-blocking information needs the player's attention. | Only the relevant supporting detail is yellow; it never implies that an underfunded subset can place. | Overall status remains **READY** or **BLOCKED**. |
+| Blocked / failure | Red (`§c`, `#FF5555`) | Nothing may begin: any missing material or Use, protection denial, conflict, illegal geometry, unsafe clearance, stale quote, or another hard failure. | Resource-unavailable cells and printable/conflicting cells glow red; whole-operation limit refusals use the special presentation below. | **BLOCKED** |
 
 Kept cells are not a status and should remain absent from the ghost or use a neutral treatment;
-they must not appear green as though they will be charged and placed. **PLACE** is green,
-**PLACE AVAILABLE** is yellow, and **CANCEL** remains neutral rather than red.
+they must not appear green as though they will be charged and placed. **PLACE** is green and exists
+only for a fully affordable prefab; **CANCEL** remains neutral rather than red.
 
 A whole-operation scan, changed-cell, span, or chunk refusal is a special blocked presentation.
 Suppress all of its block ghosts rather than rendering an impossible operation as if some part
@@ -289,18 +271,17 @@ or `RIGHT requests print`: right-click must refuse without spending or clearing 
 session, leaving the player free to resize it.
 
 Water's configured Use multiplier is a yellow supporting detail, not a warning state: a legal,
-fully affordable water plan remains green **READY**. A shortage still becomes **PARTIAL BUILD**, and
-an illegal water plan remains **BLOCKED**.
+fully affordable water plan remains green **READY**. A shortage or illegal water plan is
+**BLOCKED**.
 
 The primary action-bar line, chat prefix, and confirmation action must use the operation's overall
 state color. Supporting details may remain white or gray for readability, but must not contradict
-the state. A completed full wave reports in green; a completed partial wave reports in yellow with
-the exact remainder; a refusal reports in red with the reason. For example:
+the state. A completed wave reports in green; a refusal reports in red with the reason. For
+example:
 
 ```text
 READY — 120 blocks · 120 Uses
-PARTIAL BUILD — place 83 / 120 · 37 will remain
-BLOCKED — 0 / 120 can be placed · missing Water Bucket
+BLOCKED — missing Stone ×24, Oak Planks ×13 · Uses 83 / 120
 ```
 
 Color is reinforcement, not the only signal. Every state retains its explicit word, exact counts,
@@ -502,13 +483,12 @@ SELECTED → ANCHORED → AWAITING CONFIRMATION → PLACING
    location. A command alternative should exist for rotation and cancellation.
 3. **Awaiting confirmation:** a second ordinary right-click on the anchored preview requests the
    exact confirmation quote. It **does not place blocks**. Conflicts and hard safety failures
-   refuse with the exact reason and remain anchored. A resource shortage follows the universal
-   partial-build rule: if at least one cell is affordable after reserving the activation Uses, the
-   player receives **PLACE AVAILABLE** and **CANCEL** buttons with an unmistakable incomplete
-   quote. A fully affordable plan receives **PLACE** and **CANCEL**.
+   refuse with the exact reason and remain anchored. A resource shortage also refuses: every
+   printable cell and the activation Uses must be affordable together before the player receives
+   **PLACE** and **CANCEL**.
 4. **Placing:** clicking **PLACE**, or running `/wand prefab confirm <opaque-token>`, performs one
-   final revalidation. **PLACE AVAILABLE** uses the same bound-token path. Only that successful
-   confirmation can charge the activation cost or start the paced wave.
+   final revalidation. Only that successful confirmation can charge the activation cost or start
+   the paced wave.
 
 Selecting a normal form exits prefab mode. Selecting another prefab replaces the preview. Moving
 world, losing the offhand wand, logging out, or quote expiry cancels the pending confirmation.
@@ -531,16 +511,17 @@ Make sure the preview and cleared area are correct. There is no wand undo.
 [PLACE] [CANCEL]  Expires in 30s
 ```
 
-Shortage example:
+Shortage refusal:
 
 ```text
-PARTIAL BUILD — Starter House — 17 × 9 × 14
-Place 312 / 420 blocks now; keep 8 matching blocks; 108 will remain
-Uses now: 312 placement + 20 prefab = 332
+BLOCKED — Starter House — 17 × 9 × 14
 Missing: Oak Planks ×64, Glass ×30, Cobblestone ×14
-The unfinished cells are yellow in the preview. Each continuation pays its quoted prefab activation Uses.
-[PLACE 312 AVAILABLE] [CANCEL]  Expires in 30s
+Uses: 332 available / 440 needed
+Every printable cell must be affordable. Nothing was placed or spent.
 ```
+
+The unavailable cells are red in the preview and no confirmation token or **PLACE** button is
+issued. After restocking, the player right-clicks again for a fresh complete quote.
 
 Do not say the design is one-shot or that it cannot be rerun. It can be placed repeatedly and can
 be rerun at the same anchor to repair missing cells. The warning is about the absence of undo for
@@ -553,7 +534,7 @@ The opaque confirmation token must bind at least:
 - prefab ID plus catalog version/content hash,
 - world, anchor, and rotation,
 - exact expanded plan hash,
-- exact affordable subset and missing/material requirement,
+- exact complete material requirements and inventory availability,
 - activation cost,
 - issue time and expiry.
 
@@ -570,7 +551,7 @@ Prefab matching is stricter than the current primitive “occupied means kept”
   complete placement before anything is spent.
 - If every prefab block already matches, refuse as already complete and spend nothing.
 
-This makes rerunning safe and useful: a partially interrupted house can be completed without
+This makes rerunning safe and useful: an interrupted house can be completed without
 repaying for its finished cells. It also prevents a tree, chest, or wall from being silently
 incorporated into a malformed prefab.
 
@@ -663,7 +644,7 @@ players can place, so catalog changes require deliberate versioning and a previe
 Denarii shop price is not duplicated here.
 
 Catalog reload is atomic: validate every changed prefab into a new catalog first, then swap it in.
-An invalid file does not partially replace the live version. Existing confirmation tokens become
+An invalid file never replaces only part of the live version. Existing confirmation tokens become
 invalid when their prefab hash changes.
 
 ### 8.9 Safety and accounting invariants
@@ -673,28 +654,25 @@ paste API. That preserves:
 
 - WorldGuard and Lands checks for every target and required-clearance cell,
 - complete-plan resource classification before the first block,
-- explicit confirmation of the exact affordable subset when the complete plan is short,
+- all-or-nothing material, cell-Use, and activation-Use admission,
 - per-completed-cell inventory and Use charging,
 - player-attributed LogBlock placement logging when the runtime hook is connected,
 - chunk tickets and paced placement,
 - global player build statistics, and
 - the no-teleport entity policy.
 
-The final confirmation rechecks every condition. A hard preflight refusal, a resource plan with
-zero affordable cells, or an expired/changed quote spends no materials, no Uses, and no activation
-cost.
+The final confirmation rechecks every condition. A hard preflight refusal, any resource shortage,
+or an expired/changed quote spends no materials, no Uses, and no activation cost.
 
 That recheck includes the world border, build height, touched chunks, safe replaceability,
 required-clearance volume, and entity intersections in addition to access, protection, materials,
 and Uses.
 
-The activation cost is reserved before determining how many cell Uses remain affordable and is
-charged when a validated wave actually starts. If zero cells can begin because of an internal
-failure, restore it. Once at least one cell is successfully placed, the activation work has been
-used and the activation cost remains spent; ordinary cell Uses and materials are still charged
-only for completed cells. Every later confirmed partial continuation is a new prefab invocation
-and pays its newly quoted activation cost. Waiving it would require a durable prefab-job identity
-and recovery rules that are intentionally outside v1.
+The complete material and cell-Use budget is checked together with the activation cost before a
+confirmation is issued, and the activation cost is charged only when the fully revalidated wave
+starts. If no cell can begin because of an internal failure, restore it. Once at least one cell is
+successfully placed, the activation work has been used and the activation cost remains spent;
+ordinary cell Uses and materials are still charged only for completed cells.
 
 A living entity intersecting any solid prefab target refuses final confirmation. If an entity
 enters during the paced wave, use the existing defer/retry behavior and leave an uncharged gap if
@@ -702,10 +680,10 @@ it remains. The completion message must identify the gap and explain that the pl
 area and rerun the same reusable prefab at the same anchor. The wand never pushes or teleports an
 entity.
 
-Wrong blocks, lost permission, a changed wand, logout, or server interruption can leave a partial
-physical structure, just as an interrupted primitive wave can today. A rerun safely keeps exact
-matches and quotes only missing cells. This implementation does not add a wand-level rollback
-system.
+Wrong blocks, lost permission, a changed wand, logout, or server interruption can leave an
+incomplete physical structure, just as an interrupted primitive wave can today. A rerun safely
+keeps exact matches, but all remaining printable cells must be affordable before it starts. This
+implementation does not add a wand-level rollback system.
 
 ### 8.10 Prefab size
 
@@ -719,7 +697,7 @@ phase first needs:
 - a separate `max-prefab-cells` and clearance-volume cap,
 - persisted/resumable placement jobs across disconnects and restarts,
 - stronger chunk scheduling and per-tick work budgets, and
-- clear recovery tooling for partial jobs.
+- clear recovery tooling for interrupted jobs.
 
 Splitting a large build into separately unlockable foundation, shell, roof, and interior sections
 is a safer initial alternative and creates useful progression in the shop.
@@ -748,9 +726,6 @@ prefabs:
   max-chunks: 8
   max-clearance-cells: 8192
   require-logblock: true
-
-placement:
-  partial-confirmation-seconds: 10
 ```
 
 Configuration validation must reject negative Use costs, zero/negative limits, an activation cost
@@ -772,16 +747,14 @@ larger than the configured wand maximum, and internally inconsistent span/cell/c
 - Remove duplicated gesture/validator bounds.
 - Add unit tests at every exact boundary and just beyond it.
 
-### Implemented — universal partial admission
+### Implemented — atomic resource admission
 
-- Convert the existing per-cell budget decisions into an exact admitted subset without changing
-  material assignments or substituting materials.
-- Add the shared green/yellow/red status renderer, per-cell affordability colors, full shortage
-  copy, bound partial confirmation, retained anchors, and continuation behavior for all existing
-  forms.
-- Record actual block/Use totals while excluding resource-partial waves from completed-print and
-  largest-completed-print statistics.
-- Update the player guide and README only when the runtime behavior changes from all-or-nothing.
+- Assign the complete deterministic material pattern before checking affordability; never
+  substitute materials or rephase the texture.
+- Require every printable cell and its Use cost to be affordable together before a wave can start.
+- Show resource-unavailable cells and the overall shortage as red **BLOCKED**, with exact missing
+  materials and Uses and no subset confirmation.
+- Keep prefab confirmation for fully affordable plans, bound to the exact complete quote.
 
 ### Implemented — common primitives
 
@@ -827,17 +800,13 @@ The implemented baseline is ready for production only when all of the following 
 - A whole-operation limit refusal names the limit and resize action without quoting material or
   Uses, and right-click leaves the preview anchored and adjustable.
 - Solid mode cannot silently exceed its quoted cells, items, or Uses.
-- Every form keeps the full intended ghost on a resource shortage, distinguishes green affordable
-  cells from yellow unavailable cells, and requires explicit **PLACE AVAILABLE** confirmation.
-- Preview, action bar, chat, confirmation, and completion messages consistently use green for
-  ready, yellow for caution/partial, and red for blocked/failure without relying on color alone.
-- A partial confirmation places exactly its quoted subset. It never substitutes palette materials,
-  rephases the texture, or silently changes after inventory or Uses change.
-- Zero affordable cells spend nothing; kept and resource-skipped cells cost nothing.
-- After a partial wave, the frozen plan remains available for restocking and continuation until the
-  player cancels or the session expires.
-- Global block and Use totals include successful partial work, but completion and largest-print
-  totals do not treat it as a completed print.
+- Every form keeps the full intended ghost on a resource shortage, marks unavailable assigned cells
+  red, and blocks the entire start.
+- Preview, action bar, chat, and confirmation messages consistently use green for ready, yellow for
+  supporting details, and red for blocked/failure without relying on color alone.
+- No shortage confirmation or subset placement is offered. Restocking can make the complete
+  live plan ready without changing its deterministic material assignments.
+- Any resource shortage spends nothing; kept and entity-skipped cells cost nothing.
 - `/wand prefab` reveals and completes only designs the player has unlocked or is permitted to use.
 - A paid unlock survives restarts and wand replacement.
 - The same prefab can be placed repeatedly; no placement consumes the unlock.
@@ -849,8 +818,8 @@ The implemented baseline is ready for production only when all of the following 
   placement.
 - A real player-attributed LogBlock hook is present and verified before prefab launch, unless the
   owner has explicitly accepted operation without rollback attribution.
-- A partial prefab can be rerun at the same anchor to place only the missing cells.
-- Every confirmed prefab continuation clearly quotes and charges its activation Uses.
+- An interrupted prefab can be rerun at the same anchor; exact matches are kept, and every
+  remaining printable cell plus activation Uses must be affordable before confirmation.
 - There is no claim of rollback or refund for blocks that were successfully placed.
 
 ## 12. Remaining rollout choices
